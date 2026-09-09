@@ -89,6 +89,46 @@ export async function look(api, pin) {
   return { name: r.name, size: r.size, date: r.date, link: api.link(pin) };
 }
 
+/**
+ * Print a pin to the terminal — but only if a terminal can print it. The Worker
+ * names the type on a HEAD, so an image, a video, a PDF or a zip is turned away
+ * before a single byte of it is fetched, with somewhere else to go instead.
+ */
+const READABLE = /^(text\/|application\/(json|xml|javascript|x-ndjson)$)/;
+
+const LABELS = [
+  [/^image\//, "an image"], [/^video\//, "a video"], [/^audio\//, "an audio file"],
+  [/^application\/pdf$/, "a PDF"], [/zip|gzip|tar|7z|rar/, "an archive"],
+];
+
+function label(type) {
+  for (const [re, word] of LABELS) if (re.test(type)) return word;
+  return type && type !== "application/octet-stream" ? "a " + type + " file" : "not text";
+}
+
+export async function show(api, pin) {
+  const head = await api.probe(pin);
+  if (head.status === 404) throw new Error(`no file found for pin '${pin}'`);
+  if (!head.ok) throw new Error(`could not read pin '${pin}' (HTTP ${head.status})`);
+
+  const what = head.name || pin;
+  if (!READABLE.test(head.type)) {
+    throw new Error([
+      `${what} is ${label(head.type)} — not something a terminal can show.`,
+      `  db open ${pin}   look at it in a browser`,
+      `  db get ${pin}    save it here`,
+    ].join("\n"));
+  }
+
+  const r = await api.read(pin);
+  if (!r.ok) throw new Error(`could not read pin '${pin}' (HTTP ${r.status})`);
+  // A .txt that is really a binary still gets turned away here.
+  if (r.body.includes("\u0000")) {
+    throw new Error(`${what} says it is text but is not — use db get ${pin} instead`);
+  }
+  return { name: what, size: head.size, text: r.body };
+}
+
 /** Download into `dir` (default: here). Returns the path written. */
 export async function receive(api, pin, dir = ".") {
   const hit = await look(api, pin);

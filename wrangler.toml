@@ -14,6 +14,10 @@ QUOTA_GB = "10"
 # not a storage one: hashing costs ~1.4 ms per MB and a free-plan Worker gets
 # 10 ms per request. Nothing written by this version needs it.
 ZIP_LIMIT_MB = "5"
+# The longest a `db open` / `db qr` share link may be signed for. Those links
+# carry a signature instead of the password, so the browser they land in is
+# never asked for one; db itself asks for a week.
+SHARE_HOURS = "720"
 
 [[r2_buckets]]
 binding = "BUCKET"

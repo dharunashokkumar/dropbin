@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Api, DEFAULT_HOST } from "./api.js";
-import { look, receive, report, send } from "./actions.js";
+import { look, receive, report, send, show } from "./actions.js";
 import { menu } from "./menu.js";
 import { browse, copy } from "./sys.js";
 import { ask, err, human, out, release, say, secret, B, D, G, Z } from "./term.js";
@@ -19,9 +19,9 @@ const HELP = `dropbin — send a file, get a file, nothing else.
   db                       the menu
   db up PATH [PIN]         upload a file, or a folder zipped first
   db get PIN [FOLDER]      download what a pin holds (never overwrites)
-  db view PIN              print a text file to stdout
-  db qr PIN                a scannable code for the link
-  db open PIN              open the link in a browser
+  db view PIN              print a pin to the terminal, if it is text
+  db qr PIN                a scannable code that opens without the password
+  db open PIN              look at it in a browser, no password asked
   db rm PIN                delete a pin and get the space back
   db free                  how much room is left
 
@@ -131,9 +131,9 @@ async function cmdGet(api, opts, args) {
 
 async function cmdView(api, opts, args) {
   if (!args[0]) { err("Which pin?"); return 2; }
-  const r = await api.read(args[0]);
-  if (!r.ok) { err(`could not read pin '${args[0]}' (HTTP ${r.status})`); return 1; }
-  process.stdout.write(r.body.endsWith("\n") ? r.body : r.body + "\n");
+  // Anything a terminal cannot show throws instead, and says where to go.
+  const seen = await show(api, args[0]);
+  out(seen.text);
   return 0;
 }
 
@@ -154,22 +154,31 @@ async function cmdFree(api, opts, args, info) {
   return 0;
 }
 
+// These two hand the link to something that cannot be asked for a password — a
+// browser, or a phone pointed at a code — so both share it instead of linking
+// it: one pin, read-only, a week, and the far end lands on the preview page.
+const SHARED = "no password, for the next 7 days";
+
 async function cmdQr(api, opts, args) {
   if (!args[0]) { err("Which pin?"); return 2; }
   const hit = await look(api, args[0]);
+  const link = api.share(args[0]);
   out("");
-  out(render(hit.link, { colour: !!process.stdout.isTTY && !process.env.NO_COLOR }));
+  out(render(link, { colour: !!process.stdout.isTTY && !process.env.NO_COLOR }));
   out("");
   out(`  ${hit.name}  ${human(hit.size)}`);
-  out(`  ${D}${hit.link}${Z}`);
+  out(`  ${D}${link}${Z}`);
+  say(`${D}Scanning it shows the file in a browser — ${SHARED}.${Z}`);
   return 0;
 }
 
 async function cmdOpen(api, opts, args) {
   if (!args[0]) { err("Which pin?"); return 2; }
   const hit = await look(api, args[0]);
-  browse(hit.link);
-  say(`Opening ${hit.link}`);
+  const link = api.share(args[0]);
+  browse(link);
+  say(`Opening ${B}${hit.name}${Z}  ${human(hit.size)}  ${D}(${SHARED})${Z}`);
+  out(link);
   return 0;
 }
 

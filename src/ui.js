@@ -1,14 +1,15 @@
-// The frontend: three dialogs, in the style of the file managers that shipped
+// The frontend: four dialogs, in the style of the file managers that shipped
 // with desktops before the web took the job over. Grey face, bevelled edges,
 // a title bar with a close box.
 //
 //   /         two buttons and a storage meter
 //   /upload   what to send, which pin, go
 //   /get      type a pin, take the thing behind it
+//   /PIN      look at the thing behind it, and save it only if you want to
 //
 // Everything works with JavaScript off except folder upload, which needs it —
 // the folder is zipped in the browser so the Worker never has to.
-import { csize, esc, hsize, icon, viewable, when } from "./util.js";
+import { csize, esc, hsize, icon, isAudio, isImage, isMedia, viewable, when } from "./util.js";
 
 const CSS = `
 :root{--face:#c0c0c0;--hi:#fff;--sh:#808080;--dk:#000;--ink:#000;
@@ -97,6 +98,19 @@ label.opt small{color:#404040}
 .err{color:#800000;font-weight:700}
 .foot{margin-top:12px;font-size:11px;color:#404040}
 .foot .well{display:block;margin-top:4px;font-size:11px;padding:6px 8px}
+
+/* the preview: a sunken well with the file sitting in it */
+.win.wide{width:680px}
+.pv{background:var(--well);margin:0 0 12px;min-height:150px;overflow:auto;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:inset 1px 1px 0 var(--sh),inset -1px -1px 0 var(--hi),
+  inset 2px 2px 0 var(--dk),inset -2px -2px 0 var(--face)}
+/* a 10px icon and a 4000px photo both have to sit in there sensibly */
+.pv img,.pv video{display:block;max-width:100%;max-height:62vh;margin:16px}
+.pv iframe{display:block;width:100%;height:62vh;border:0;background:var(--well)}
+.pv audio{width:100%;margin:14px 12px}
+.pv .none{padding:30px 16px;text-align:center;color:#404040;font:12px var(--mono)}
+.pv .none b{display:block;font:700 13px var(--ui);color:var(--ink);margin-bottom:5px}
 `;
 
 const UPICON =
@@ -203,11 +217,12 @@ function shell(title, body, withJs = false) {
     body + (withJs ? "<script>" + JS + "</script>" : "") + "</body></html>";
 }
 
-// One dialog window: title bar, close box, contents.
-function win(title, close, body, closeLabel = "close") {
-  return '<div class="win"><div class="tbar"><b>' + esc(title) + "</b>" +
-    '<a class="x" href="' + close + '" title="' + esc(closeLabel) + '">&times;</a></div>' +
-    '<div class="body">' + body + "</div></div>";
+// One dialog window: title bar, close box, contents. A null `close` leaves the
+// close box off — someone holding a share link has nowhere else to go.
+function win(title, close, body, closeLabel = "close", wide = false) {
+  return '<div class="win' + (wide ? " wide" : "") + '"><div class="tbar"><b>' + esc(title) + "</b>" +
+    (close ? '<a class="x" href="' + close + '" title="' + esc(closeLabel) + '">&times;</a>' : "") +
+    '</div><div class="body">' + body + "</div></div>";
 }
 
 export function loginPage(next, bad) {
@@ -308,8 +323,50 @@ export function getPage(origin, pin, hit, fresh) {
     </div>
     <hr>
     <div class="row">
-      <a class="btn" href="${href}">Download</a>
-      ${viewable(hit.name) ? `<a class="btn" href="${href}?view=1">View</a>` : ""}
+      <a class="btn" href="${href}?dl=1">Download</a>
+      <a class="btn" href="${href}">Open</a>
       <a class="btn" href="/">Close</a>
     </div>`));
+}
+
+/**
+ * What a browser gets for `GET /PIN`: the thing itself, on screen, and a
+ * Download button it has to be asked for. `key` is the `?k=` of a share link —
+ * present when the visitor has no password, and then every link this page
+ * builds has to carry it too, or the next click asks for one.
+ */
+export function viewPage(origin, pin, hit, key) {
+  const href = "/" + encodeURIComponent(pin);
+  // esc() so the "&" between params is an &amp; in the markup, not a stray entity.
+  const at = (q) => esc(href + "?" + (key ? "k=" + encodeURIComponent(key) + "&" : "") + q);
+  const raw = at("view=1");
+  const name = esc(hit.name);
+
+  let show;
+  if (hit.many || !viewable(hit.name)) {
+    show = `<div class="none"><b>Nothing to show</b>
+      ${esc(icon(hit.name))} ${name} is not something a browser can open.</div>`;
+  } else if (isImage(hit.name)) {
+    show = `<img src="${raw}" alt="${name}">`;
+  } else if (isMedia(hit.name)) {
+    const tag = isAudio(hit.name) ? "audio" : "video";
+    show = `<${tag} src="${raw}" controls preload="metadata"></${tag}>`;
+  } else {
+    show = `<iframe src="${raw}" title="${name}"></iframe>`;
+  }
+
+  return shell(hit.name + " — dropbin", win(hit.name, key ? null : "/", `
+    <div class="pv">${show}</div>
+    <div class="kv">
+      <div><span>file</span><b>${name}</b>&nbsp;${esc(csize(hit.size))}${
+        hit.at ? " &middot; " + esc(when(hit.at)) : ""}</div>
+      <div><span>pin</span>${esc(pin)}</div>
+      <div><span>url</span>${esc(origin + href)}</div>
+    </div>
+    <hr>
+    <div class="row">
+      <a class="btn" href="${at("dl=1")}">Download</a>
+      ${hit.many || !viewable(hit.name) ? "" : `<a class="btn" href="${raw}" target="_blank">Full window</a>`}
+      ${key ? "" : '<a class="btn" href="/get">Another pin</a>'}
+    </div>`, "close", true));
 }

@@ -82,9 +82,9 @@ db up ./holiday.png photos     # a file, your own pin
 db up ./project                # a folder — zipped here, then sent
 db get 4821                    # save it in this folder
 db get 4821 ~/Downloads        # save it there
-db view 4821                   # print a text file
+db view 4821                   # print it here, if it is text
 db qr 4821                     # a code to point a phone at
-db open 4821                   # open the link in a browser
+db open 4821                   # look at it in a browser
 db rm 4821                     # throw the pin away
 db free                        # how much room is left
 ```
@@ -223,8 +223,10 @@ upload through a plain form post.
 | method | path | what |
 |---|---|---|
 | GET | `/` | the two options and the meter — `?info=1` `?json=1` |
-| GET | `/PIN` | download it; `?view=1` opens inline; ranges supported |
+| GET | `/PIN` | a browser looks at it, everything else downloads it |
+| GET | `/PIN?view=1` | the bytes inline; `?dl=1` saves them; ranges supported |
 | GET | `/PIN?info=1` | what the pin holds, without fetching it |
+| GET | `/PIN?k=EXP.SIG` | a share link: that one pin, read-only, no password |
 | PUT | `/up` | raw-body upload — `X-Name`, `X-Pin`, `?quiet=1` |
 | POST | `/up` | multipart: one file field + optional `pin` |
 | DELETE | `/PIN` | throw the pin away |
@@ -235,6 +237,20 @@ upload through a plain form post.
 
 - `/?info=1` → `pins` `used` `quota`, all in bytes
 - `/PIN?info=1` → `name` `size` `date`
+
+### Share links
+
+`db open` and `db qr` hand a link to something that cannot be asked for a
+password — a browser, or a phone pointed at a code — so they sign one instead
+of just linking it. `?k=` is an expiry and an HMAC of the pin, keyed on the
+password: nothing is stored anywhere, it opens exactly that one pin, it is
+read-only (a `DELETE` or an upload with it is refused), and it lasts a week.
+`SHARE_HOURS` in `wrangler.toml` caps how far ahead one may be signed.
+
+A browser landing on a pin gets the file on screen — an image, a video, text,
+a PDF — with a Download button it has to be asked for. Uploaded files still
+carry `Content-Security-Policy: sandbox` and `nosniff`, so an uploaded page
+cannot act on the origin while it is being looked at.
 
 ## Notes
 

@@ -10,19 +10,22 @@
 //
 //   GET  /              the two options, plus how much room is left
 //   GET  /upload /get   the browser's two dialogs
-//   GET  /PIN           download   (?view=1 inline, ?info=1 name/size/date)
+//   GET  /PIN           a browser previews it; everything else downloads it
+//                       (?view=1 the bytes inline, ?dl=1 save it,
+//                        ?info=1 name/size/date, ?k= a signed link)
 //   PUT  /up  POST /up  upload     (X-Pin / ?pin= / form field, else a new pin)
 //   DEL  /PIN           throw it away and get the space back
 //   GET  /cli /cli.ps1  the terminal client, pre-pointed at this host
 //
 // Browsers get HTML, curl gets plain text, and both come from the same route.
-// Everything except /cli, /robots.txt and /favicon.ico needs the password.
+// Everything except /cli, /robots.txt and /favicon.ico needs the password — or,
+// for one pin and read-only, the `?k=` a share link carries.
 
 import {
   BASE, authed, cleanName, csize, eq, fmt, guessType, hsize, html, json, newPin,
-  pinItems, pinOk, quota, text, token, usage, when, zipLimit, zipStream,
+  pinItems, pinOk, quota, shared, text, token, usage, when, zipLimit, zipStream,
 } from "./util.js";
-import { getPage, homePage, loginPage, uploadPage } from "./ui.js";
+import { getPage, homePage, loginPage, uploadPage, viewPage } from "./ui.js";
 import shScript from "./drop.sh";
 import psScript from "./drop.ps1";
 
@@ -101,6 +104,15 @@ async function pinFind(env, pin) {
   return { many: objs, name: pin + ".zip", size, at: at ? new Date(at) : null };
 }
 
+// What to call the bytes when they are being looked at rather than saved. The
+// stored type only wins if it says something: `db` PUTs everything as
+// application/octet-stream, and under `nosniff` a vague type is a blank preview
+// rather than a guess.
+function viewType(name, stored) {
+  const s = String(stored || "").split(";")[0].trim().toLowerCase();
+  return s && s !== "application/octet-stream" ? s : guessType(name);
+}
+
 function serveHeaders(name, view) {
   const h = new Headers(BASE);
   h.set("x-content-type-options", "nosniff");
@@ -115,7 +127,8 @@ async function serveOne(req, env, obj, name, view) {
     const h = serveHeaders(name, view);
     h.set("content-length", String(obj.size));
     h.set("accept-ranges", "bytes");
-    h.set("content-type", view ? guessType(name) : "application/octet-stream");
+    h.set("content-type", view ? viewType(name, obj.httpMetadata && obj.httpMetadata.contentType)
+      : "application/octet-stream");
     return new Response(null, { headers: h });
   }
 
@@ -127,7 +140,7 @@ async function serveOne(req, env, obj, name, view) {
   h.set("etag", got.httpEtag);
   h.set("accept-ranges", "bytes");
   h.set("content-type", view
-    ? (got.httpMetadata && got.httpMetadata.contentType) || guessType(name)
+    ? viewType(name, got.httpMetadata && got.httpMetadata.contentType)
     : "application/octet-stream");
   // writeHttpMetadata can put the stored disposition back; ours wins.
   h.set("content-disposition",
@@ -159,7 +172,7 @@ function serveMany(env, pin, hit) {
   });
 }
 
-async function download(req, url, env, pin, f) {
+async function download(req, url, env, pin, f, key) {
   const hit = await pinFind(env, pin);
   if (!hit) return gone(f, "no such pin: " + pin);
   const view = url.searchParams.get("view") === "1";
@@ -170,6 +183,12 @@ async function download(req, url, env, pin, f) {
       at: hit.at ? hit.at.toISOString() : null, url: pinUrl(url.origin, pin) };
     if (f === "json") return json(meta);
     return text(hit.name + "\t" + hit.size + "\t" + when(hit.at));
+  }
+
+  // A browser looks at the thing first and only saves it if it asks to; every
+  // other client — curl, `db get`, the shell clients — still gets the bytes.
+  if (f === "html" && !view && url.searchParams.get("dl") !== "1") {
+    return html(viewPage(url.origin, pin, hit, key));
   }
 
   if (hit.many) return serveMany(env, pin, hit);
@@ -205,7 +224,8 @@ async function upload(req, url, env, tail, f) {
   } else {
     name = cleanName(
       req.headers.get("x-name") || url.searchParams.get("name") || tail.join("/") || "file");
-    type = ct && !ct.includes("x-www-form-urlencoded") ? ct.split(";")[0] : guessType(name);
+    // `db` and `curl -T` both send octet-stream; the name knows better.
+    type = viewType(name, ct.includes("x-www-form-urlencoded") ? "" : ct);
     body = await req.arrayBuffer();
   }
 
@@ -299,8 +319,19 @@ async function route(req, env) {
     });
   }
 
-  // Everything below needs the password.
-  if (!(await authed(req, url, env))) return needAuth(url, f);
+  // Everything below needs the password — or, for exactly one pin and read-only,
+  // the signature a share link carries. `db open` and `db qr` hand their link to
+  // a browser or a phone, and neither of those can be asked for a password.
+  if (!(await authed(req, url, env))) {
+    const one = segs.length === 1 ? segs[0] : "";
+    if (!one || !pinOk(one) || RESERVED.has(one.toLowerCase()) || !(await shared(url, env, one))) {
+      return needAuth(url, f);
+    }
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return text("this link only reads pin " + one, 405, { allow: "GET, HEAD" });
+    }
+    return download(req, url, env, one, f, url.searchParams.get("k"));
+  }
 
   if (head === "up") return upload(req, url, env, segs.slice(1), f);
   if (head === "api") return gone(f, "unknown endpoint");
@@ -336,7 +367,7 @@ async function route(req, env) {
     return serveOne(req, env, h, name, url.searchParams.get("view") === "1");
   }
 
-  return download(req, url, env, head, f);
+  return download(req, url, env, head, f, null);
 }
 
 export default {

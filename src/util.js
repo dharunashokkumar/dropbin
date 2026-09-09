@@ -63,6 +63,43 @@ export async function authed(req, url, env) {
   return false;
 }
 
+/* --------------------------------------------------------- share links --- */
+// `db open` and `db qr` hand a link to a browser or a phone, and neither can be
+// asked for the password. So the link carries a `?k=` of its own: an expiry and
+// an HMAC of the pin, keyed on the password. It is stateless (nothing is stored
+// anywhere), it opens exactly one pin, and it is read-only — the router hands a
+// `k` visitor to the preview page and to GET, and to nothing else.
+//
+// `cli/src/api.js` builds the same string; the two must agree byte for byte.
+
+// The longest a share link may be signed for. Whoever signs one holds the
+// password and could mint another, so this is a footgun guard, not a lock:
+// it stops a link from being valid for the next century. `db` asks for a week.
+export function shareTtl(env) {
+  const h = Number(env.SHARE_HOURS);
+  return (Number.isFinite(h) && h > 0 ? h : 720) * 3600;   // 30 days
+}
+
+export async function sign(pass, pin, exp) {
+  const key = await crypto.subtle.importKey(
+    "raw", te.encode(pass), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  // "/" is the one character pinOk() forbids, so the three parts cannot blur.
+  const mac = await crypto.subtle.sign("HMAC", key, te.encode(APP + "/" + pin + "/" + exp));
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
+}
+
+/** True if `?k=` is a live signature for this pin. */
+export async function shared(url, env, pin) {
+  const k = url.searchParams.get("k") || "";
+  const dot = k.indexOf(".");
+  if (dot < 1) return false;
+  const exp = k.slice(0, dot);
+  if (!/^\d{1,12}$/.test(exp)) return false;
+  const now = Date.now();
+  if (Number(exp) * 1000 < now || Number(exp) * 1000 > now + shareTtl(env) * 1000) return false;
+  return eq(k.slice(dot + 1), await sign(env.ACCESS_PASSWORD || "changeme", pin, exp));
+}
+
 /* ------------------------------------------------------------ responses --- */
 
 export const BASE = { "cache-control": "no-store", "x-robots-tag": "noindex, nofollow" };
@@ -214,6 +251,7 @@ export function isText(name) {
   const t = TYPES[ext(name)] || "";
   return t.startsWith("text/") || t === "application/json" || t === "application/xml";
 }
+export function isAudio(name) { return (TYPES[ext(name)] || "").startsWith("audio/"); }
 export function isMedia(name) {
   const t = TYPES[ext(name)] || "";
   return t.startsWith("video/") || t.startsWith("audio/");

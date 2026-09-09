@@ -69,9 +69,25 @@ zip breaks somewhere north of 7 MB. `zipStream()` in `util.js` survives only for
 the legacy path below. Keep per-byte work out of the Worker.
 
 **One route serves three audiences.** `fmt(req, url)` picks `html` / `text` /
-`json` from `Accept` (or `?json=1`), so `GET /4821` returns the file to a
-browser and `GET /?info=1` returns a tab-separated line to curl. Do not add
-separate API paths for this; extend `fmt` instead.
+`json` from `Accept` (or `?json=1`), so `GET /4821` shows a browser the file
+and hands curl the bytes. Do not add separate API paths for this; extend `fmt`
+instead.
+
+**A browser looks, everything else downloads.** `GET /PIN` with
+`Accept: text/html` is `viewPage()` — the image, video, text or PDF on screen
+in the dialog, with a Download button. `?view=1` is the bytes inline (what the
+page's `<img>`/`<iframe>` loads), `?dl=1` is the attachment, and anything that
+is not a browser still gets the file with no query string at all, which is what
+keeps `curl -OJ`, `db get` and both shell clients working. Do not make `/PIN`
+download for a browser again: that was the old behaviour and it is the thing
+this page exists to fix.
+
+**`viewType()` in `index.js` decides what to call the bytes on the way out**,
+and it distrusts the stored type: `db` and `curl -T` both PUT
+`application/octet-stream`, and under `nosniff` a vague type means a blank
+preview rather than a guess, so the filename wins whenever the stored type says
+nothing. Uploads run through it too, so what is stored is right in the first
+place.
 
 **`?info=1` is the clients' only data feed** — one tab-separated line,
 `pins/used/quota` at the root and `name/size/date` on a pin. Both clients parse
@@ -95,7 +111,9 @@ everything else: `GET /?info=1` doubles as the password check and the storage
 read, `PUT /up?quiet=1` with `X-Name`/`X-Pin` uploads, `GET /PIN` downloads,
 `DELETE /PIN` reclaims. Change `?info=1` and three clients break, not two.
 `cli/src/actions.js` holds the work and both the menu and the flat commands call
-it — new behaviour goes there, not into one of them.
+it — new behaviour goes there, not into one of them. `db open` and `db qr` do
+not use `link()`; they use `share()`, so what they hand over opens without a
+password.
 
 **`db` zips folders itself** (`cli/src/zip.js`, `node:zlib`) instead of shelling
 out to `zip`/`tar`/`Compress-Archive`, so a fresh machine needs nothing but
@@ -122,6 +140,17 @@ the `dp` cookie. The cookie stores `sha256("dropbin:" + password)`, never the
 password, and comparison is length-checked constant time. Only `/cli`,
 `/cli.ps1`, `/robots.txt` and `/favicon.ico` skip the gate.
 
+**Share links are the one other way in.** `db open` and `db qr` hand a link to
+a browser or a phone, neither of which can be asked for a password, so they
+sign one: `?k=<expiry>.<hmac>`, the HMAC keyed on the password over
+`"dropbin/" + pin + "/" + exp` (`sign()` in `util.js`, `share()` in
+`cli/src/api.js` — **two implementations of one string; change both or
+neither**). `/` is the separator because `pinOk()` forbids it, so the three
+parts cannot blur into each other. Nothing is stored: `shared()` recomputes it.
+A `k` visitor reaches `download()` for that one pin and nothing else — no `/up`,
+no `DELETE`, no other pin, no home page — and `shareTtl(env)` caps how far ahead
+one may be signed. `db` asks for a week.
+
 **Legacy pins.** Versions before this one wrote several objects under one pin.
 `pinFind()` still detects that and hands them back as a single zip through
 `zipStream()` (capped by `zipLimit(env)`, a CPU budget), and `/PIN/sub/file`
@@ -140,6 +169,13 @@ still resolves. Nothing written today produces such a pin.
 - The interactive clients offer two options and no more. Delete exists only as
   `DELETE /PIN`, `drop rm` and `db rm` — deliberately, so storage can be
   reclaimed without putting a destructive key in a menu.
+- `db view` prints text and refuses everything else. `show()` in
+  `cli/src/actions.js` reads the type off a `HEAD /PIN?view=1` — so the Worker's
+  table decides and there is no second copy of it in the client — turns an
+  image, a video, a PDF or an archive away *before* fetching a byte of it, and
+  points at `db open` and `db get` instead. A file that claims to be text and
+  holds a NUL is caught after the fetch. Keep that: the whole point is that a
+  binary never reaches the terminal.
 - `db` stores nothing. The password is asked for on every run and never written
   anywhere: no config file, no token cache, and `DROP_PASS` covers scripts. Do
   not add a `db login`.
@@ -184,6 +220,17 @@ still resolves. Nothing written today produces such a pin.
 - In Git Bash on Windows, `db up $(pwd)/x` hands Node `/c/Users/…`, which
   `path.resolve` maps onto the current drive root instead. `expand()` in
   `cli/src/actions.js` rewrites a leading `/c/` to `c:/` for that reason.
+- **`Content-Security-Policy: sandbox` and Chrome's PDF viewer do not mix.** The
+  preview `<iframe>` shows a PDF in Firefox (pdf.js is ordinary JS in the page)
+  and a blank box in headless Chrome, which treats its viewer as a plugin the
+  sandbox blocks. Images, video, audio and text are fine everywhere. The header
+  stays — it is what stops an uploaded `.html`/`.svg` acting on the origin — so
+  every preview keeps a Download and a "Full window" button under it. Do not
+  weaken the CSP to make one file type render.
+- Chrome can be driven headless for a look at the UI without the browser
+  extension:
+  `chrome --headless=new --disable-gpu --virtual-time-budget=5000
+  --user-data-dir=SOMEWHERE --window-size=760,620 --screenshot=out.png URL`.
 
 ## Keeping this file honest
 

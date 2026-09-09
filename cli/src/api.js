@@ -4,6 +4,7 @@
 // quota at the root and name/size/date on a pin. Change nothing about how it is
 // parsed here without changing the Worker in the same pass.
 
+import { createHmac } from "node:crypto";
 import { request as insecure } from "node:http";
 import { request as secure } from "node:https";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -13,6 +14,7 @@ export const DEFAULT_HOST = "https://files.dharun.dev";
 
 const enc = encodeURIComponent;
 const ok = (s) => s >= 200 && s < 300;
+const dec = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
 
 export class Api {
   constructor(host, pass) {
@@ -21,6 +23,19 @@ export class Api {
   }
 
   link(pin) { return this.host + "/" + enc(pin); }
+
+  /**
+   * A link that opens on its own: one pin, read-only, and it expires. `db open`
+   * hands this to a browser and `db qr` puts it in a code, and neither of those
+   * can be asked for a password. The Worker recomputes the same HMAC in
+   * `sign()` in src/util.js, so the string signed here is its business too.
+   */
+  share(pin, hours = 168) {
+    const exp = String(Math.floor(Date.now() / 1000) + Math.round(hours * 3600));
+    const sig = createHmac("sha256", this.pass)
+      .update("dropbin/" + pin + "/" + exp).digest("hex").slice(0, 24);
+    return this.link(pin) + "?k=" + exp + "." + sig;
+  }
 
   /** Anything with a small text response. `file` streams a body up. */
   call(path, { method = "GET", headers = {}, file, size, onProgress } = {}) {
@@ -35,6 +50,7 @@ export class Api {
         res.on("end", () => resolve({
           status: res.statusCode,
           ok: ok(res.statusCode),
+          headers: res.headers,
           body: Buffer.concat(chunks).toString("utf8").trim(),
         }));
       });
@@ -109,6 +125,26 @@ export class Api {
   }
 
   get(pin, dest, onProgress) { return this.save("/" + enc(pin), dest, onProgress); }
+
+  /**
+   * Name, type and size, without pulling the body down. `?view=1` is what makes
+   * the Worker answer with the real content type instead of octet-stream, so
+   * this is where "can a terminal print it?" gets decided — no second copy of
+   * the Worker's type table over here.
+   */
+  async probe(pin) {
+    const r = await this.call("/" + enc(pin) + "?view=1", { method: "HEAD" });
+    const h = r.headers || {};
+    const d = String(h["content-disposition"] || "");
+    const m = /filename\*=UTF-8''([^;]+)/i.exec(d);
+    return {
+      status: r.status, ok: r.ok,
+      name: m ? dec(m[1]) : "",
+      type: String(h["content-type"] || "").split(";")[0].trim().toLowerCase(),
+      size: Number(h["content-length"] || 0),
+    };
+  }
+
   read(pin) { return this.call("/" + enc(pin) + "?view=1"); }
   remove(pin) { return this.call("/" + enc(pin), { method: "DELETE" }); }
 }
