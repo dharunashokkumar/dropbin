@@ -291,12 +291,12 @@ cannot act on the origin while it is being looked at.
   is not bundled into the Worker — only `src/drop.sh` and `src/drop.ps1` are.
 - **Change anything in this tool and update `CLAUDE.md` (and this README) to match.**
 
-## Contributing
+## Working on it
 
 Read [`CLAUDE.md`](CLAUDE.md) first — it is the architecture, and it explains
-why most of the obvious features are deliberately absent. Then
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for how to set up, what to verify, and
-which changes will not be taken.
+why most of the obvious features are deliberately absent, what CI checks, and
+how to verify a change against `npm run dev` (there is no test suite). Deploys
+and npm releases are run by hand, not by a workflow.
 
 Found a security problem? Do not open an issue —
 [report it privately](https://github.com/dharunashokkumar/dropbin/security/advisories/new).

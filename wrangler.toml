@@ -34,8 +34,8 @@ fallthrough = false
 [observability]
 enabled = true
 
-# Wrangler creates the DNS record for this itself; the dharun.dev zone has to
-# already be on the same Cloudflare account.
+# Wrangler creates the DNS record for this itself; the zone has to already be
+# on the same Cloudflare account. Change the pattern to deploy your own.
 [[routes]]
 pattern = "files.dharun.dev"
 custom_domain = true

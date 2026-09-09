@@ -49,10 +49,13 @@ contracts that break a client silently rather than loudly — no CR in
 `__HOST__` still present in both shell clients — plus the dry-run bundle,
 `cli/` having no runtime dependencies, and `db --help` / `db --version` /
 `db < /dev/null` on Linux, macOS and Windows against Node 18 and 22. Nothing in
-CI needs a Cloudflare account. `publish.yml` releases `cli/` to npm on a `v*`
-release (needs `NPM_TOKEN`); `deploy.yml` is manual only (needs
-`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`) — deliberately, so a push
-never replaces what is live.
+CI needs a Cloudflare account.
+
+`ci.yml` is the only workflow, and it only ever *checks*. Deploying
+(`npx wrangler deploy`) and releasing `db` (`cd cli && npm publish`) are run by
+hand from a terminal — deliberately, so nothing in this repository holds a
+Cloudflare or npm credential and no push can replace what is live. Do not add a
+workflow that deploys or publishes.
 
 Stopping `wrangler dev` leaves `workerd.exe` and a `node ... wrangler.js dev`
 process alive on Windows; they keep `.wrangler/state` locked. Kill both before
@@ -220,9 +223,10 @@ still resolves. Nothing written today produces such a pin.
   shell, and prove it with the curl above rather than with `secret list`, which
   only ever shows names.
 - **`wrangler dev` serves `/cli` pointed at the custom-domain route**, not at
-  localhost: `url.origin` is `http://files.dharun.dev` even when you fetched
-  from `127.0.0.1:8787`, so a locally downloaded `drop` talks to *production*.
-  Always `export DROP_HOST=http://127.0.0.1:8787` when testing the clients.
+  localhost: `url.origin` is the `route` pattern from `wrangler.toml` even when
+  you fetched from `127.0.0.1:8787`, so a locally downloaded `drop` talks to
+  *production*. Always `export DROP_HOST=http://127.0.0.1:8787` when testing the
+  clients.
 - `curl -T` appends the local filename only when the URL ends in `/` **and**
   has no query string. Hence the documented `https://:$PASS@host/up/` form
   (basic auth, no query) and the `X-Name` / `X-Pin` headers.
@@ -265,5 +269,18 @@ still resolves. Nothing written today produces such a pin.
 ## Keeping this file honest
 
 Change anything in this tool — routes, the two-option shape, the `?info=1`
-format, limits — and update this file and `README.md` in the same pass. The
-user asked for this explicitly; a stale CLAUDE.md is worse than none.
+format, limits — and update this file and `README.md` in the same pass. A stale
+CLAUDE.md is worse than none.
+
+**This repository is public. Nothing written into it describes its owner or
+their machine.** No names, no email addresses, no real hostnames or account
+identifiers in prose, no local paths (`C:\Users\...`, `/home/...`), no "the user
+asked for", no "my laptop", no screenshots of a desktop. Write every instruction
+for whoever is reading it: "your deployment", "the `route` in `wrangler.toml`",
+`https://host/`, `example.com`. Platform notes are fine — Windows and Git Bash
+behave the way they behave for everyone — as long as they describe the platform
+and not a particular machine. The identifying details that must exist are
+exactly three, all of them functional: the copyright line in `LICENSE`, the
+`author` / `repository` fields npm requires in the two `package.json` files, and
+the deployment's own hostname in `wrangler.toml` and `cli/src/api.js`. Nothing
+else.
