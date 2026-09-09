@@ -96,7 +96,7 @@ label.opt small{color:#404040}
   background:repeating-linear-gradient(90deg,var(--nav) 0 7px,var(--well) 7px 9px)}
 .err{color:#800000;font-weight:700}
 .foot{margin-top:12px;font-size:11px;color:#404040}
-.foot .well{margin-top:4px;font-size:11px;padding:6px 8px}
+.foot .well{display:block;margin-top:4px;font-size:11px;padding:6px 8px}
 `;
 
 const UPICON =
@@ -237,7 +237,8 @@ export function homePage(origin, host, used, cap, pins) {
       <span class="t">of ${esc(hsize(cap))}</span>
     </div>
     <p class="foot">${esc(host)} &middot; ${pins} pin${pins === 1 ? "" : "s"} stored
-      <span class="well">curl -s ${esc(origin)}/cli -o drop &amp;&amp; bash drop</span></p>`,
+      <span class="well">npm i -g dropbin &nbsp;&rarr;&nbsp; db</span>
+      <span class="well">or once: curl -s ${esc(origin)}/cli -o drop &amp;&amp; bash drop</span></p>`,
     "sign out"));
 }
 

@@ -10,25 +10,34 @@ npm run deploy                   # deploy to Cloudflare
 npm run logs                     # wrangler tail
 npx wrangler deploy --dry-run --outdir /tmp/build   # typecheck-ish: bundles without deploying
 npx wrangler secret put ACCESS_PASSWORD             # override the password var
+
+cd cli && npm pack                                  # build what people install
+npm i -g --prefix /tmp/gt cli/dropbin-*.tgz         # try the bin shims safely
+cd cli && npm version patch && npm publish          # release `db` to npm
 ```
 
 There is no test suite. Verification is manual against `npm run dev`: drive the
-HTTP surface with `curl` and the two clients with piped keystrokes. The menu
-reads one keypress at a time and text prompts read a line, so a whole session
-is one string — this uploads a file under a custom pin and quits:
+HTTP surface with `curl`, and the clients with piped input. Every prompt in
+every client reads a *line*, so a whole session is one string. `db` is the easy
+one to script, because it reads stdin:
 
 ```sh
 export DROP_PASS=changeme DROP_HOST=http://127.0.0.1:8787
-printf '12./proj\n2my pin\nx' | bash <(curl -s localhost:8787/cli)
-#        ││       │ │       └ any key dismisses the confirmation, then EOF quits
-#        ││       │ └ the pin
-#        ││       └ 2 = custom pin
-#        │└ the path
-#        └ 1 = upload, 2 = folder
+printf '1\n1\n./notes.txt\n2\nmy-pin\nq\n' | node cli/bin/db.js --no-copy
+#        │ │ │            │ │      └ q at the "back to the menu" prompt quits
+#        │ │ │            │ └ the pin
+#        │ │ │            └ 2 = my own pin
+#        │ │ └ the path
+#        │ └ 1 = file, 2 = folder
+#        └ 1 = upload, 2 = download
+node cli/bin/db.js < /dev/null      # must print "Bye." and exit, never redraw
 ```
 
-`node --check src/*.js` and `bash -n src/drop.sh` catch syntax errors without a
-server. For the PowerShell script:
+`src/drop.sh` reads from `/dev/tty` whenever it can open one, so piping drives
+it only on a machine without a terminal; test that client by hand instead.
+
+`node --check src/*.js cli/src/*.js` and `bash -n src/drop.sh` catch syntax
+errors without a server. For the PowerShell script:
 `[System.Management.Automation.Language.Parser]::ParseFile(path,[ref]$null,[ref]$e)`.
 
 Stopping `wrangler dev` leaves `workerd.exe` and a `node ... wrangler.js dev`
@@ -78,7 +87,32 @@ has already collapsed `..` before any of this runs.
 control character or reserved — `pinOk()` is deliberately permissive, so every
 link is built with `encodeURIComponent`.
 
-**The two CLIs are served, not shipped.** `src/drop.sh` and `src/drop.ps1` are
+**`db` is the client people install, and `cli/` is its own npm package.**
+Published as `dropbin` with two bins (`db` and `dropbin`), plain Node 18+, zero
+dependencies, no build step, and invisible to Wrangler — the `[[rules]]` block
+below only pulls in the two served scripts. It speaks the same surface as
+everything else: `GET /?info=1` doubles as the password check and the storage
+read, `PUT /up?quiet=1` with `X-Name`/`X-Pin` uploads, `GET /PIN` downloads,
+`DELETE /PIN` reclaims. Change `?info=1` and three clients break, not two.
+`cli/src/actions.js` holds the work and both the menu and the flat commands call
+it — new behaviour goes there, not into one of them.
+
+**`db` zips folders itself** (`cli/src/zip.js`, `node:zlib`) instead of shelling
+out to `zip`/`tar`/`Compress-Archive`, so a fresh machine needs nothing but
+Node. Local headers are written with placeholder sizes and patched through the
+file handle afterwards rather than using data descriptors, because PowerShell's
+`Expand-Archive` is fussy about those; the round trip is verified with both
+`unzip -t` and `Expand-Archive`.
+
+**The QR encoder in `cli/src/qr.js` is ours** — byte mode, level M, versions
+1-15, no dependency. It was checked module-for-module against the `qrcode` npm
+package forced to a single byte segment. That library splits mixed text into
+numeric and alphanumeric segments by default, so for a link containing digits
+its output differs from ours while both are valid; compare with
+`QRCode.create([{ data: link, mode: "byte" }], { errorCorrectionLevel: "M" })`
+or the diff is meaningless.
+
+**The two shell CLIs are served, not shipped.** `src/drop.sh` and `src/drop.ps1` are
 imported as strings via the `[[rules]]` `type = "Text"` block in
 `wrangler.toml`, and `__HOST__` is replaced with the request origin at `/cli`
 and `/cli.ps1`. Keep that placeholder intact.
@@ -104,8 +138,15 @@ still resolves. Nothing written today produces such a pin.
   must keep working with JS off, which is why the folder `<input>` ships
   `disabled hidden` and is enabled by `ready()`.
 - The interactive clients offer two options and no more. Delete exists only as
-  `DELETE /PIN` and `drop rm` — deliberately, so storage can be reclaimed
-  without putting a destructive key in a menu.
+  `DELETE /PIN`, `drop rm` and `db rm` — deliberately, so storage can be
+  reclaimed without putting a destructive key in a menu.
+- `db` stores nothing. The password is asked for on every run and never written
+  anywhere: no config file, no token cache, and `DROP_PASS` covers scripts. Do
+  not add a `db login`.
+- In `db`, stdout carries the command's *result* — the link, the saved path, the
+  storage line, the QR, `--help` — and stderr carries everything else: prompts,
+  the progress bar, the pretty summary block after an upload, and errors. So
+  `db up x` shows a block and pipes one link, and `db --help | grep qr` works.
 - Uploaded files are served with `Content-Security-Policy: sandbox` and
   `nosniff` so an uploaded `.html`/`.svg` cannot act on the origin. Preserve
   those headers on any new file-serving path.
@@ -132,9 +173,17 @@ still resolves. Nothing written today produces such a pin.
 - PowerShell unrolls a one-element array when an `if` expression's value is
   assigned, so `$a = if (…) { @($x[1..1]) }` yields a bare string and `$a[0]`
   then returns a single character. Assign inside the branches instead.
+- **`db`'s prompts return `null` at end of input, and null means quit.** Same
+  trap as above from the other side: Node's readline emits `close` instead of
+  failing, so `ask()`, `choice()` and `secret()` in `cli/src/term.js` resolve to
+  null and every caller has to return on it. Reach for `?.` on one of those
+  answers and EOF silently becomes "keep going", which redraws the menu forever.
 - In Git Bash, an argument that looks like a Unix path (`-d 'next=/demo'`) is
   rewritten to `C:/Program Files/Git/demo`. Prefix such commands with
   `MSYS_NO_PATHCONV=1` when testing.
+- In Git Bash on Windows, `db up $(pwd)/x` hands Node `/c/Users/…`, which
+  `path.resolve` maps onto the current drive root instead. `expand()` in
+  `cli/src/actions.js` rewrites a leading `/c/` to `c:/` for that reason.
 
 ## Keeping this file honest
 

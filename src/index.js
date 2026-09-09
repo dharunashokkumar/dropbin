@@ -80,7 +80,8 @@ async function home(req, url, env, f) {
     "  download  curl -OJ \"" + url.origin + "/PIN?p=$PASS\"\n\n" +
     "  " + pins + (pins === 1 ? " pin · " : " pins · ") + hsize(used) + " used · " +
     hsize(free) + " free of " + hsize(cap) + "\n\n" +
-    "  curl -s " + url.origin + "/cli -o drop && bash drop\n");
+    "  the tool    npm i -g dropbin   then: db\n" +
+    "  or once     curl -s " + url.origin + "/cli -o drop && bash drop\n");
 }
 
 /* ------------------------------------------------------------- download --- */

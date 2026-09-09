@@ -62,10 +62,60 @@ cookie the web login sets (one year).
 match R2's free tier. It is a display figure, not an enforced cap; R2 will keep
 accepting uploads past it and start billing.
 
-## The terminal client
+## The `db` command
 
-Nothing to install — it is a shell script the Worker hands you, already pointed
-at your host.
+Anyone who uses this more than once should install the tool. One command, then
+`db` is on the path:
+
+```sh
+npm i -g dropbin        # installs `db`, and `dropbin` as a longer alias
+db                      # the menu
+```
+
+A zero-dependency Node package (18 or newer) that lives in [`cli/`](cli) and is
+published from there. The Worker only advertises it; nothing about the tool runs
+on the server.
+
+```sh
+db up ./holiday.png            # a file, random pin
+db up ./holiday.png photos     # a file, your own pin
+db up ./project                # a folder — zipped here, then sent
+db get 4821                    # save it in this folder
+db get 4821 ~/Downloads        # save it there
+db view 4821                   # print a text file
+db qr 4821                     # a code to point a phone at
+db open 4821                   # open the link in a browser
+db rm 4821                     # throw the pin away
+db free                        # how much room is left
+```
+
+The menu offers the same two options the shell client does, and nothing else:
+
+```
+ dropbin  files.example.com
+ --------------------------------------------------------------
+   [1] Upload a file or folder
+   [2] Download with a pin
+   [q] Quit
+
+   Storage: 9.71 GB free of 10.00 GB · 6 pins stored
+
+ Choice:
+```
+
+The password is asked for on every run and stored nowhere — there is no config
+file and no token cache. `DROP_PASS=...` skips the prompt for scripts and CI,
+`DROP_HOST=...` (or `--host`) points `db` at another deployment. After an upload
+the link goes to the clipboard unless you pass `--no-copy`. Folders are zipped
+with `node:zlib`, so `zip`, `tar` and `Compress-Archive` do not have to exist.
+Downloads never overwrite: a second copy of `holiday.png` becomes
+`holiday.png.1`. `db up` and `db get` print the one useful line — the link, the
+saved path — on stdout and everything else on stderr, so they pipe cleanly.
+
+## The client with nothing to install
+
+For a one-off, or a machine without Node: the Worker hands you a shell script,
+already pointed at your host.
 
 ```sh
 curl -s https://files.example.com/cli -o drop && bash drop
@@ -207,4 +257,6 @@ upload through a plain form post.
   come back out as one zip, capped at `ZIP_LIMIT_MB` of hashing, and the
   individual files stay reachable at `/PIN/path/to/file`.
 - Local dev: `npm run dev`. R2 is simulated on disk; nothing touches the cloud.
+- The `db` tool is a second npm package in `cli/`, published as `dropbin`. It
+  is not bundled into the Worker — only `src/drop.sh` and `src/drop.ps1` are.
 - **Change anything in this tool and update `CLAUDE.md` (and this README) to match.**

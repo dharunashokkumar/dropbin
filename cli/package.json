@@ -1,0 +1,35 @@
+{
+  "name": "dropbin",
+  "version": "1.0.1",
+  "description": "Upload and download files from a dropbin instance. Two operations, no listing, no dependencies.",
+  "keywords": [
+    "dropbin",
+    "file-sharing",
+    "upload",
+    "cli",
+    "cloudflare",
+    "r2"
+  ],
+  "license": "MIT",
+  "author": "Dharun Ashokkumar",
+  "homepage": "https://github.com/dharunashokkumar/dropbin#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dharunashokkumar/dropbin.git",
+    "directory": "cli"
+  },
+  "bugs": "https://github.com/dharunashokkumar/dropbin/issues",
+  "type": "module",
+  "bin": {
+    "db": "bin/db.js",
+    "dropbin": "bin/db.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ]
+}

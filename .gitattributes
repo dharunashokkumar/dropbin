@@ -4,3 +4,8 @@
 # keep LF endings on every checkout — CRLF breaks the bash one outright.
 *.sh text eol=lf
 *.ps1 text eol=lf
+
+# The `db` package is published from this tree, and a CRLF shebang is a broken
+# interpreter line on macOS and Linux.
+cli/bin/*.js text eol=lf
+cli/src/*.js text eol=lf
