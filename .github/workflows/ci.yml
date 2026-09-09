@@ -25,7 +25,7 @@ jobs:
     name: Parse every script
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -61,7 +61,7 @@ jobs:
     name: Contracts that break a client silently
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The Worker serves these files verbatim and npm ships db.js with a
       # shebang: a CR breaks drop.sh outright and makes an unrunnable
@@ -102,7 +102,7 @@ jobs:
     name: Worker bundles
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Wrangler 4 refuses to start on anything below Node 22.
       - uses: actions/setup-node@v4
@@ -125,7 +125,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node: [18, 22]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -165,7 +165,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The oldest Node the package claims to support, since the installers are
       # what a fresh machine runs.
