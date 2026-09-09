@@ -1,4 +1,4 @@
-# There is no test suite yet (issue: "Add a test suite"). What CI can do today
+# There is no test suite. What CI can do today
 # is exactly what CLAUDE.md documents as verification without a server: parse
 # every script in all five languages, guard the two contracts that break a
 # client silently (LF endings and the __HOST__ placeholder), bundle the Worker,
@@ -90,9 +90,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Wrangler 4 refuses to start on anything below Node 22.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
