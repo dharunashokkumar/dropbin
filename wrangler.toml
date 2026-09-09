@@ -3,11 +3,13 @@ main = "src/index.js"
 compatibility_date = "2025-01-01"
 workers_dev = true
 
-# The access password. Override it in production without touching this file:
+# The access password lives in a secret, never here:
 #   npx wrangler secret put ACCESS_PASSWORD
-# (a secret of the same name wins over this var)
+# It is deliberately absent from [vars]: Wrangler refuses a secret whose name a
+# plain var already holds ("Binding name 'ACCESS_PASSWORD' already in use"), so
+# listing it here would lock the password into the file. With no secret set the
+# Worker falls back to "changeme" in code, which is what `wrangler dev` uses.
 [vars]
-ACCESS_PASSWORD = "changeme"
 # What the storage meter counts down from. R2's free tier is 10 GB.
 QUOTA_GB = "10"
 # Ceiling for zipping an old multi-file pin on the way out. It is a CPU budget,

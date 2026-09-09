@@ -46,11 +46,21 @@ record itself.
 
 ### The password
 
-`changeme` out of the box, set as a plain var in `wrangler.toml`. To keep it out of the file:
+`changeme` until you set one — that fallback is in the code, not in
+`wrangler.toml`, which deliberately keeps `ACCESS_PASSWORD` out of `[vars]`:
 
 ```sh
-npx wrangler secret put ACCESS_PASSWORD    # a secret of the same name wins
+npx wrangler secret put ACCESS_PASSWORD    # takes effect at once, no redeploy
 ```
+
+A secret does **not** override a var of the same name; Wrangler refuses to
+create one, with `Binding name 'ACCESS_PASSWORD' already in use`. So if you have
+added the var back, remove it and `npx wrangler deploy` before setting the
+secret. Check what is live with `npx wrangler secret list` — an empty `[]` means
+the password is still `changeme`, whatever you think you set.
+
+Changing it invalidates the `dp` cookie in every browser and every outstanding
+`db open` / `db qr` link, since those are signed with the password as the key.
 
 It gates everything except `/cli`, `/cli.ps1`, `/robots.txt` and the favicon.
 Accepted four ways: `?p=`, an `X-Pass:` header, HTTP basic auth, or the `dp`

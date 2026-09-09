@@ -9,7 +9,8 @@ npm run dev                      # wrangler dev on 127.0.0.1:8787, R2 simulated 
 npm run deploy                   # deploy to Cloudflare
 npm run logs                     # wrangler tail
 npx wrangler deploy --dry-run --outdir /tmp/build   # typecheck-ish: bundles without deploying
-npx wrangler secret put ACCESS_PASSWORD             # override the password var
+npx wrangler secret put ACCESS_PASSWORD             # set the live password
+npx wrangler secret list                            # [] means it is still changeme
 
 cd cli && npm pack                                  # build what people install
 npm i -g --prefix /tmp/gt cli/dropbin-*.tgz         # try the bin shims safely
@@ -189,6 +190,22 @@ still resolves. Nothing written today produces such a pin.
 
 ## Traps worth knowing
 
+- **A secret does not override a `[vars]` entry of the same name.** Wrangler
+  refuses to create it at all — `Binding name 'ACCESS_PASSWORD' already in use
+  [code: 10053]` — so a password listed in `wrangler.toml` is the password,
+  and `wrangler secret put` looks like it should fix that but cannot. That is
+  why `ACCESS_PASSWORD` is absent from `[vars]` and the `|| "changeme"`
+  fallback lives in `util.js` and `index.js` instead. When a client reports a
+  correct password rejected, check the deployment before the client:
+  `curl -o /dev/null -w '%{http_code}' -H "X-Pass: PASS" https://host/?info=1`
+  and `npx wrangler secret list` (an empty `[]` means nothing was ever set).
+- **`wrangler secret put` reads stdin when it is not a tty, and an empty value
+  is accepted silently** — it prints the same "✨ Success!" and `secret list`
+  then shows the name, so everything looks set while `env.ACCESS_PASSWORD` is
+  `""`, falsy, and the `|| "changeme"` fallback quietly takes over. Run it as
+  `printf 'PASS' | npx wrangler secret put ACCESS_PASSWORD` from any wrapped
+  shell, and prove it with the curl above rather than with `secret list`, which
+  only ever shows names.
 - **`wrangler dev` serves `/cli` pointed at the custom-domain route**, not at
   localhost: `url.origin` is `http://files.dharun.dev` even when you fetched
   from `127.0.0.1:8787`, so a locally downloaded `drop` talks to *production*.
