@@ -1,7 +1,8 @@
 * text=auto
 
-# Both clients are served verbatim by the Worker (/cli, /cli.ps1), so they must
-# keep LF endings on every checkout — CRLF breaks the bash one outright.
+# The two clients and the two installers are served verbatim by the Worker
+# (/cli, /cli.ps1, /install.sh, /install.ps1), so they must keep LF endings on
+# every checkout — CRLF breaks the two shell ones outright.
 *.sh text eol=lf
 *.ps1 text eol=lf
 

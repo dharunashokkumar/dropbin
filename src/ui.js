@@ -252,7 +252,8 @@ export function homePage(origin, host, used, cap, pins) {
       <span class="t">of ${esc(hsize(cap))}</span>
     </div>
     <p class="foot">${esc(host)} &middot; ${pins} pin${pins === 1 ? "" : "s"} stored
-      <span class="well">npm i -g dropbin &nbsp;&rarr;&nbsp; db</span>
+      <span class="well">curl -fsSL ${esc(origin)}/install.sh | sh &nbsp;&rarr;&nbsp; db</span>
+      <span class="well">windows: irm ${esc(origin)}/install.ps1 | iex</span>
       <span class="well">or once: curl -s ${esc(origin)}/cli -o drop &amp;&amp; bash drop</span></p>`,
     "sign out"));
 }

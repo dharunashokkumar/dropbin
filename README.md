@@ -66,7 +66,8 @@ the password is still `changeme`, whatever you think you set.
 Changing it invalidates the `dp` cookie in every browser and every outstanding
 `db open` / `db qr` link, since those are signed with the password as the key.
 
-It gates everything except `/cli`, `/cli.ps1`, `/robots.txt` and the favicon.
+It gates everything except the two clients (`/cli`, `/cli.ps1`), the two
+installers (`/install.sh`, `/install.ps1`), `/robots.txt` and the favicon.
 Accepted four ways: `?p=`, an `X-Pass:` header, HTTP basic auth, or the `dp`
 cookie the web login sets (one year).
 
@@ -79,16 +80,63 @@ accepting uploads past it and start billing.
 ## The `db` command
 
 Anyone who uses this more than once should install the tool. One command, then
-`db` is on the path:
+`db` is on the path — pick whichever line suits the machine:
 
 ```sh
-npm i -g dropbin        # installs `db`, and `dropbin` as a longer alias
+curl -fsSL https://files.example.com/install.sh | sh   # macOS, Linux, WSL
+npm i -g dropbin                                       # anywhere npm is
+```
+
+```powershell
+irm https://files.example.com/install.ps1 | iex        # Windows
+```
+
+```sh
 db                      # the menu
 ```
 
-A zero-dependency Node package (18 or newer) that lives in [`cli/`](cli) and is
-published from there. The Worker only advertises it; nothing about the tool runs
-on the server.
+All three land the same thing: a zero-dependency Node package (18 or newer) that
+lives in [`cli/`](cli), installing `db` and `dropbin` as a longer alias. The
+Worker only advertises it; nothing about the tool runs on the server.
+
+The installers are the shorter way in — no npm, no registry account, one command
+that fetches the release from GitHub. They need Node 18+ to already be there;
+[the client below](#the-client-with-nothing-to-install) is the one that needs
+nothing at all. Where things land:
+
+| | files | `db` |
+|---|---|---|
+| `install.sh` | `~/.local/share/dropbin` | `~/.local/bin` |
+| `install.ps1` | `%LOCALAPPDATA%\dropbin\app` | `%LOCALAPPDATA%\dropbin\bin`, added to your PATH |
+
+Fetched from a deployment, an installer bakes that deployment into the shim it
+writes, so the `db` it leaves behind already points at your host — `DROP_HOST`
+still overrides it. Fetched from GitHub it bakes in nothing:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dharunashokkumar/dropbin/main/install.sh | sh
+```
+
+Both take the same handful of options — a version to pin, where to put things,
+and how to undo it:
+
+```sh
+curl -fsSL https://files.example.com/install.sh | sh -s -- --version 1.1.0
+curl -fsSL https://files.example.com/install.sh | sh -s -- --uninstall
+sh install.sh --help
+```
+
+```powershell
+# iex cannot pass arguments, so hand it a script block instead
+& ([scriptblock]::Create((irm https://files.example.com/install.ps1))) -Version 1.1.0
+& ([scriptblock]::Create((irm https://files.example.com/install.ps1))) -Uninstall
+```
+
+Releases are on [GitHub](https://github.com/dharunashokkumar/dropbin/releases),
+two archives holding the same files: `dropbin.tgz` for `install.sh` (and for
+`npm i -g ./dropbin.tgz`) and `dropbin.zip` for `install.ps1`, which unpacks with
+`Expand-Archive`. `--tarball` and `-Archive` install one you already have, which
+is how a machine with no way out to GitHub gets `db`.
 
 ```sh
 db up ./holiday.png            # a file, random pin
@@ -245,6 +293,7 @@ upload through a plain form post.
 | POST | `/up` | multipart: one file field + optional `pin` |
 | DELETE | `/PIN` | throw the pin away |
 | GET | `/cli`, `/cli.ps1` | the client scripts, pre-pointed at this host |
+| GET | `/install.sh`, `/install.ps1` | the `db` installers, pre-pointed the same way |
 | GET | `/upload`, `/get` | the browser's two dialogs |
 
 `?info=1` is the terminal client's only data feed, one tab-separated line:
@@ -288,15 +337,19 @@ cannot act on the origin while it is being looked at.
   individual files stay reachable at `/PIN/path/to/file`.
 - Local dev: `npm run dev`. R2 is simulated on disk; nothing touches the cloud.
 - The `db` tool is a second npm package in `cli/`, published as `dropbin`. It
-  is not bundled into the Worker — only `src/drop.sh` and `src/drop.ps1` are.
+  is not bundled into the Worker — only the two clients and the two installers
+  are, as text with `__HOST__` swapped for the request origin on the way out.
+- A release is cut by hand: `node cli/pack.js` builds `dropbin.tgz` and
+  `dropbin.zip` out of the same files and refuses if the two disagree, and
+  `gh release create` attaches them. No workflow deploys or publishes anything.
 - **Change anything in this tool and update `CLAUDE.md` (and this README) to match.**
 
 ## Working on it
 
 Read [`CLAUDE.md`](CLAUDE.md) first — it is the architecture, and it explains
 why most of the obvious features are deliberately absent, what CI checks, and
-how to verify a change against `npm run dev` (there is no test suite). Deploys
-and npm releases are run by hand, not by a workflow.
+how to verify a change against `npm run dev` (there is no test suite). Deploys,
+GitHub releases and npm publishes are run by hand, not by a workflow.
 
 Found a security problem? Do not open an issue —
 [report it privately](https://github.com/dharunashokkumar/dropbin/security/advisories/new).

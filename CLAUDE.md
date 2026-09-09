@@ -15,6 +15,12 @@ npx wrangler secret list                            # [] means it is still chang
 cd cli && npm pack                                  # build what people install
 npm i -g --prefix /tmp/gt cli/dropbin-*.tgz         # try the bin shims safely
 cd cli && npm version patch && npm publish          # release `db` to npm
+
+node cli/pack.js                                    # the two release archives
+sh install.sh --tarball cli/dist/dropbin.tgz --dir /tmp/a --bin /tmp/b
+sh install.sh --uninstall --dir /tmp/a --bin /tmp/b
+gh release create v1.1.0 --title "dropbin 1.1.0" --notes-file NOTES.md \
+  cli/dist/dropbin.tgz cli/dist/dropbin.zip       # by hand, never a workflow
 ```
 
 There is no test suite. Verification is manual against `npm run dev`: drive the
@@ -45,17 +51,20 @@ errors without a server. For the PowerShell script:
 
 `.github/workflows/ci.yml` runs exactly those on every push, plus the two
 contracts that break a client silently rather than loudly — no CR in
-`drop.sh` / `drop.ps1` / `cli/**` (`.gitattributes` says LF; CI proves it) and
-`__HOST__` still present in both shell clients — plus the dry-run bundle,
-`cli/` having no runtime dependencies, and `db --help` / `db --version` /
-`db < /dev/null` on Linux, macOS and Windows against Node 18 and 22. Nothing in
-CI needs a Cloudflare account.
+`drop.sh` / `drop.ps1` / `install.*` / `cli/**` (`.gitattributes` says LF; CI
+proves it) and `__HOST__` still present in all four served scripts — plus the
+dry-run bundle, `cli/` having no runtime dependencies, and `db --help` /
+`db --version` / `db < /dev/null` on Linux, macOS and Windows against Node 18
+and 22. The `install` job builds the release archives out of the checkout and
+runs the real installer against them on all three, then uninstalls and checks
+nothing was left behind. Nothing in CI needs a Cloudflare account.
 
 `ci.yml` is the only workflow, and it only ever *checks*. Deploying
-(`npx wrangler deploy`) and releasing `db` (`cd cli && npm publish`) are run by
-hand from a terminal — deliberately, so nothing in this repository holds a
-Cloudflare or npm credential and no push can replace what is live. Do not add a
-workflow that deploys or publishes.
+(`npx wrangler deploy`), cutting a GitHub release (`gh release create`) and
+releasing `db` (`cd cli && npm publish`) are run by hand from a terminal —
+deliberately, so nothing in this repository holds a Cloudflare or npm credential
+and no push can replace what is live or what people install. Do not add a
+workflow that deploys, releases or publishes.
 
 Stopping `wrangler dev` leaves `workerd.exe` and a `node ... wrangler.js dev`
 process alive on Windows; they keep `.wrangler/state` locked. Kill both before
@@ -110,10 +119,10 @@ place.
 `pins/used/quota` at the root and `name/size/date` on a pin. Both clients parse
 it, so changing that format breaks them at once.
 
-**Resolution order** in `route()`: `/up`, `/api/*`, `/cli*`, `/upload` and
-`/get` are claimed first (all of them are in `RESERVED`), a single segment is a
-pin, and a deeper path only resolves if a real object sits there. `new URL()`
-has already collapsed `..` before any of this runs.
+**Resolution order** in `route()`: `/up`, `/api/*`, `/cli*`, `/install.*`,
+`/upload` and `/get` are claimed first (all of them are in `RESERVED`), a single
+segment is a pin, and a deeper path only resolves if a real object sits there.
+`new URL()` has already collapsed `..` before any of this runs.
 
 **Pins.** Random ones are 4 digits, collision-checked, widening to 6 if all
 9000 fill. Custom ones are anything up to 64 characters that is not a slash, a
@@ -152,10 +161,39 @@ imported as strings via the `[[rules]]` `type = "Text"` block in
 `wrangler.toml`, and `__HOST__` is replaced with the request origin at `/cli`
 and `/cli.ps1`. Keep that placeholder intact.
 
+**So are the two installers, and they carry the same placeholder.**
+`install.sh` and `install.ps1` sit at the repository root — that is where people
+look for an installer, and where `raw.githubusercontent.com` serves them from —
+and the Worker imports them the same way to answer `/install.sh` and
+`/install.ps1`. Both routes are public, like `/cli`: a `curl | sh` cannot be
+asked for a password. Neither installer downloads anything *from* the
+deployment; they fetch the release from GitHub. What the origin substitution
+buys is the last line of the shim they write, which defaults `DROP_HOST` to the
+deployment that handed the installer over, so an installed `db` talks to the
+right host without being told. Fetched from GitHub the placeholder stays
+literal, both scripts test for `http` rather than for the placeholder itself
+(the substitution would rewrite a second mention of it), and the shim then sets
+nothing.
+
+**What the installers install is the npm package, fetched a shorter way.** No
+binaries, no build step, no bundled Node: `node cli/pack.js` turns `npm pack`
+into two release assets holding the same files — `dropbin.tgz` for `install.sh`,
+which unpacks with `tar`, and `dropbin.zip` for `install.ps1`, which unpacks
+with `Expand-Archive` because that is on every Windows machine and `tar.exe` is
+not quite. It fails if the two ever disagree. The asset names carry no version,
+so `releases/latest/download/dropbin.tgz` keeps resolving; a pinned install asks
+for `releases/download/vX.Y.Z/dropbin.tgz`. Both installers take the archive
+from disk instead (`--tarball`, `-Archive`), which is what CI drives and what an
+air-gapped machine uses. Node 18+ has to be there already — the machine with no
+Node is exactly who `/cli` is for, and both installers say so and point at it.
+Uninstalling only ever removes a shim carrying the `dropbin-shim` marker, so
+somebody else's `db` survives.
+
 **Auth** (`util.js`): the password arrives as `?p=`, `X-Pass:`, HTTP basic, or
 the `dp` cookie. The cookie stores `sha256("dropbin:" + password)`, never the
 password, and comparison is length-checked constant time. Only `/cli`,
-`/cli.ps1`, `/robots.txt` and `/favicon.ico` skip the gate.
+`/cli.ps1`, `/install.sh`, `/install.ps1`, `/robots.txt` and `/favicon.ico`
+skip the gate.
 
 **Share links are the one other way in.** `db open` and `db qr` hand a link to
 a browser or a phone, neither of which can be asked for a password, so they

@@ -2,7 +2,9 @@
 # is exactly what CLAUDE.md documents as verification without a server: parse
 # every script in all five languages, guard the two contracts that break a
 # client silently (LF endings and the __HOST__ placeholder), bundle the Worker,
-# and smoke the published CLI on every platform it claims to support.
+# smoke the published CLI on every platform it claims to support, and install it
+# from a release built out of this checkout, the way install.sh and install.ps1
+# will on someone's machine.
 name: CI
 
 on:
@@ -35,14 +37,25 @@ jobs:
       - name: bash client parses
         run: bash -n src/drop.sh
 
+      # POSIX sh, not bash: the installer is piped into whatever /bin/sh is,
+      # which on Debian and Alpine is not bash. dash is what catches a bashism.
+      - name: installer parses under sh and dash
+        run: |
+          sh -n install.sh
+          sudo apt-get install -y dash >/dev/null 2>&1 || true
+          if command -v dash >/dev/null; then dash -n install.sh; fi
+          echo "install.sh parses"
+
       - name: PowerShell client parses
         shell: pwsh
         run: |
           $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path ./src/drop.ps1), [ref]$null, [ref]$errors) | Out-Null
-          if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
-          Write-Host "drop.ps1 parses clean"
+          foreach ($f in './src/drop.ps1', './install.ps1') {
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+            Write-Host "$f parses clean"
+          }
 
   contracts:
     name: Contracts that break a client silently
@@ -56,7 +69,7 @@ jobs:
       # catches a file that got committed wrong anyway.
       - name: No CRLF in served or published files
         run: |
-          bad=$(grep -lU $'\r' src/drop.sh src/drop.ps1 cli/bin/*.js cli/src/*.js || true)
+          bad=$(grep -lU $'\r' src/drop.sh src/drop.ps1 install.sh install.ps1 cli/bin/*.js cli/src/*.js || true)
           if [ -n "$bad" ]; then
             echo "::error::CR found — these must stay LF (see .gitattributes):"
             echo "$bad"
@@ -64,11 +77,12 @@ jobs:
           fi
           echo "line endings OK"
 
-      # /cli and /cli.ps1 replace this with the request origin at serve time.
-      # Lose it and every downloaded client points at nothing.
+      # /cli, /cli.ps1, /install.sh and /install.ps1 replace this with the
+      # request origin at serve time. Lose it and every downloaded client
+      # points at nothing, and an installed `db` at the wrong deployment.
       - name: __HOST__ placeholder intact
         run: |
-          for f in src/drop.sh src/drop.ps1; do
+          for f in src/drop.sh src/drop.ps1 install.sh install.ps1; do
             grep -q '__HOST__' "$f" || { echo "::error file=$f::__HOST__ placeholder is gone"; exit 1; }
           done
           echo "placeholder OK"
@@ -142,3 +156,58 @@ jobs:
       - name: The package builds
         working-directory: cli
         run: npm pack --dry-run
+
+  install:
+    name: install ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The oldest Node the package claims to support, since the installers are
+      # what a fresh machine runs.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # The two archives a release holds, built from this checkout. It also
+      # fails if the tarball and the zip stop holding the same files.
+      - name: Build the release archives
+        run: node cli/pack.js
+
+      # --tarball / -Archive is the same path a download takes, minus the
+      # download: everything after it is what a real install does.
+      - name: install.sh puts a working db on the PATH
+        if: runner.os != 'Windows'
+        run: |
+          tmp="$RUNNER_TEMP"
+          sh install.sh --tarball cli/dist/dropbin.tgz --dir "$tmp/app" --bin "$tmp/bin" --host https://example.invalid
+          got=$("$tmp/bin/db" --version)
+          want=$(node -p "require('./cli/package.json').version")
+          if [ "$got" != "$want" ]; then
+            echo "::error::installed $got, expected $want"; exit 1
+          fi
+          sh install.sh --uninstall --dir "$tmp/app" --bin "$tmp/bin"
+          if [ -e "$tmp/bin/db" ] || [ -e "$tmp/app" ]; then
+            echo "::error::uninstall left something behind"; exit 1
+          fi
+          echo "installed $got, then removed it"
+
+      - name: install.ps1 puts a working db on the PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:RUNNER_TEMP 'app'
+          $bin = Join-Path $env:RUNNER_TEMP 'bin'
+          ./install.ps1 -Archive cli/dist/dropbin.zip -Dir $app -BinDir $bin -DropHost https://example.invalid
+          $got = & (Join-Path $bin 'db.cmd') --version
+          $want = (Get-Content ./cli/package.json -Raw | ConvertFrom-Json).version
+          if ($got -ne $want) { Write-Error "installed $got, expected $want"; exit 1 }
+          ./install.ps1 -Uninstall -Dir $app -BinDir $bin
+          if ((Test-Path (Join-Path $bin 'db.cmd')) -or (Test-Path $app)) {
+            Write-Error "uninstall left something behind"; exit 1
+          }
+          Write-Host "installed $got, then removed it"

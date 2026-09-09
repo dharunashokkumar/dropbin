@@ -16,9 +16,11 @@
 //   PUT  /up  POST /up  upload     (X-Pin / ?pin= / form field, else a new pin)
 //   DEL  /PIN           throw it away and get the space back
 //   GET  /cli /cli.ps1  the terminal client, pre-pointed at this host
+//   GET  /install.sh /install.ps1   the `db` installer, same placeholder
 //
 // Browsers get HTML, curl gets plain text, and both come from the same route.
-// Everything except /cli, /robots.txt and /favicon.ico needs the password — or,
+// Everything except the two clients, the two installers, /robots.txt and
+// /favicon.ico needs the password — or,
 // for one pin and read-only, the `?k=` a share link carries.
 
 import {
@@ -28,10 +30,12 @@ import {
 import { getPage, homePage, loginPage, uploadPage, viewPage } from "./ui.js";
 import shScript from "./drop.sh";
 import psScript from "./drop.ps1";
+import shInstall from "../install.sh";
+import psInstall from "../install.ps1";
 
 const RESERVED = new Set([
   "api", "cli", "cli.ps1", "up", "upload", "get", "www", "assets", "static",
-  "favicon.ico", "robots.txt",
+  "favicon.ico", "robots.txt", "install.sh", "install.ps1",
 ]);
 
 const ICON =
@@ -83,7 +87,9 @@ async function home(req, url, env, f) {
     "  download  curl -OJ \"" + url.origin + "/PIN?p=$PASS\"\n\n" +
     "  " + pins + (pins === 1 ? " pin · " : " pins · ") + hsize(used) + " used · " +
     hsize(free) + " free of " + hsize(cap) + "\n\n" +
-    "  the tool    npm i -g dropbin   then: db\n" +
+    "  install     curl -fsSL " + url.origin + "/install.sh | sh   then: db\n" +
+    "  on windows  irm " + url.origin + "/install.ps1 | iex\n" +
+    "  with npm    npm i -g dropbin\n" +
     "  or once     curl -s " + url.origin + "/cli -o drop && bash drop\n");
 }
 
@@ -285,6 +291,10 @@ async function route(req, env) {
   }
   if (head === "cli") return text(shScript.split("__HOST__").join(url.origin));
   if (head === "cli.ps1") return text(psScript.split("__HOST__").join(url.origin));
+  // The installers carry the same placeholder, so the `db` they leave behind
+  // talks to this deployment without having to be told to.
+  if (head === "install.sh") return text(shInstall.split("__HOST__").join(url.origin));
+  if (head === "install.ps1") return text(psInstall.split("__HOST__").join(url.origin));
 
   if (head === "api" && segs[1] === "login") {
     if (req.method !== "POST") return html(loginPage("/"));
