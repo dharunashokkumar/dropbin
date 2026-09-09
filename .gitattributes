@@ -1,0 +1,6 @@
+* text=auto
+
+# Both clients are served verbatim by the Worker (/cli, /cli.ps1), so they must
+# keep LF endings on every checkout — CRLF breaks the bash one outright.
+*.sh text eol=lf
+*.ps1 text eol=lf

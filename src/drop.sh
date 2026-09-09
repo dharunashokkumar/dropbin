@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# dropbin terminal client — line-based prompts work reliably in every terminal.
+set -u
+HOST="${DROP_HOST:-__HOST__}"; HOST="${HOST%/}"
+PASS="${DROP_PASS:-}"; TMP=""; BODY=""; CODE=""
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then E=$'\033'; B="${E}[1m"; D="${E}[2m"; R="${E}[31m"; G="${E}[32m"; Z="${E}[0m"; else B="";D="";R="";G="";Z="";fi
+clean(){ [ -n "$TMP" ] && rm -rf "$TMP"; };trap clean EXIT
+tmp(){ [ -n "$TMP" ] || TMP=$(mktemp -d 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/dropbin.$$");mkdir -p "$TMP"; }
+say(){ printf '%s\n' "$*" >&2; };err(){ say "${R}Error:${Z} $*"; };head(){ say "";say "${B}dropbin${Z}  ${D}${HOST#*://}${Z}";say "${D}----------------------------------------------------------------------${Z}"; }
+human(){ awk -v n="${1:-0}" 'BEGIN{split("B KB MB GB TB",u," ");i=1;while(n>=1024&&i<5){n/=1024;i++};if(i==1)printf "%d %s",n,u[i];else printf "%.2f %s",n,u[i]}'; }
+enc(){ local LC_ALL=C s="$1" o="" i c;for((i=0;i<${#s};i++));do c=${s:i:1};case "$c" in [a-zA-Z0-9._~-])o+="$c";;*)printf -v c '%%%02X' "'$c";o+="$c";;esac;done;printf %s "$o"; }
+INPUT=/dev/stdin;[ -r /dev/tty ]&&INPUT=/dev/tty
+ask(){ local v;printf '%b' "$1" >&2;IFS= read -r v < "$INPUT"||return 1;v="${v#\"}";v="${v%\"}";v="${v#\'}";v="${v%\'}";printf %s "$v"; }
+choice(){ local v;while :;do v=$(ask "$1"||true);v="${v,,}";case " $2 " in *" $v "*)printf %s "$v";return;;*)err "Please enter one of: $2";;esac;done; }
+path(){ local p="$1" drive rest;case "$p" in "~/"*)printf '%s/%s' "$HOME" "${p#~/}";;[A-Za-z]:\\*)if command -v cygpath >/dev/null 2>&1;then cygpath -u "$p";else drive=$(printf %s "${p:0:1}"|tr A-Z a-z);rest=${p:3};rest=${rest//\\//};if [ -d "/mnt/$drive" ];then printf '/mnt/%s/%s' "$drive" "$rest";else printf '/%s/%s' "$drive" "$rest";fi;fi;;*)printf %s "$p";;esac; }
+request(){ local f;tmp;f="$TMP/response";CODE=$(curl -sS -o "$f" -w '%{http_code}' -H "X-Pass: $PASS" "$@")||CODE=000;BODY=$(<"$f");[ "$CODE" -ge 200 ] 2>/dev/null&&[ "$CODE" -lt 300 ] 2>/dev/null; }
+transfer(){ local f;tmp;f="$TMP/response";CODE=$(curl --progress-bar -o "$f" -w '%{http_code}' -H "X-Pass: $PASS" "$@")||CODE=000;BODY=$(<"$f");[ "$CODE" -ge 200 ] 2>/dev/null&&[ "$CODE" -lt 300 ] 2>/dev/null; }
+save(){ local out="$1";shift;CODE=$(curl --progress-bar -o "$out" -w '%{http_code}' -H "X-Pass: $PASS" "$@")||CODE=000;if ! { [ "$CODE" -ge 200 ] 2>/dev/null&&[ "$CODE" -lt 300 ] 2>/dev/null;};then BODY=$(<"$out" 2>/dev/null||true);rm -f "$out";return 1;fi; }
+password(){ local v s;while :;do if [ -z "$PASS" ];then printf '%b' "Password for ${HOST#*://}: " >&2;if [ "$INPUT" = /dev/tty ];then stty -echo </dev/tty;IFS= read -r v </dev/tty||v="";stty echo </dev/tty;printf '\n' >&2;else IFS= read -r v||v="";fi;PASS="$v";[ -n "$PASS" ]||{ err "A password is required.";continue;};fi;s=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Pass: $PASS" "$HOST/?info=1")||s=000;case "$s" in 200)return;;401)err "That password was not accepted. Try again.";PASS="";;*)err "Cannot reach $HOST (HTTP $s).";exit 1;;esac;done; }
+pack(){ local d="$1" b p a;d="${d%/}";b=$(basename "$d");p=$(dirname "$d");tmp;if command -v zip >/dev/null 2>&1;then a="$TMP/$b.zip";(cd "$p"&&zip -qr "$a" "$b")||return 1;elif command -v tar >/dev/null 2>&1;then a="$TMP/$b.tgz";tar -czf "$a" -C "$p" "$b"||return 1;else err "Folder uploads need zip or tar installed.";return 1;fi;printf %s "$a"; }
+free(){ local p="$1" n=1;[ -e "$p" ]||{ printf %s "$p";return;};while [ -e "$p.$n" ];do n=$((n+1));done;printf %s "$p.$n"; }
+peek(){ request "$HOST/$(enc "$1")?info=1"||return 1;IFS=$'\t' read -r NAME SIZE DATE <<< "$BODY";[ -n "${NAME:-}" ]; }
+upload(){ local k p send n size m pin;head;say "${B}Upload${Z}";say "  [1] File";say "  [2] Folder ${D}(packed into an archive first)${Z}";say "  [b] Back";k=$(choice "\nChoice: " "1 2 b");[ "$k" = b ]&&return;p=$(ask "Path to the $([ "$k" = 1 ]&&printf file||printf folder) (paste it here): "||true);[ -n "$p" ]||{ err "No path was entered.";return;};p=$(path "$p");if [ "$k" = 1 ];then [ -f "$p" ]||{ err "Not a file: $p";return;};send="$p";else [ -d "$p" ]||{ err "Not a folder: $p";return;};say "${D}Packing $(basename "$p")...${Z}";send=$(pack "$p")||return;fi;n=$(basename "$send");size=$(wc -c < "$send"|tr -d ' ');say "";say "Ready: ${B}$n${Z} ($(human "$size"))";say "  [1] Generate a random PIN";say "  [2] Use my own PIN";say "  [b] Back";m=$(choice "Choice: " "1 2 b");[ "$m" = b ]&&return;pin="";if [ "$m" = 2 ];then pin=$(ask "Choose a PIN/name (no slashes): "||true);[ -n "$pin" ]||{ err "No PIN was entered.";return;};fi;say "";say "Uploading ${B}$n${Z}...";transfer -T "$send" -H "X-Name: $n" -H "X-Pin: $pin" "$HOST/up?quiet=1"||{ err "Upload failed (HTTP $CODE): ${BODY:-no response}";return;};pin=$(printf %s "$BODY"|tr -d '\r\n');say "";say "${G}${B}Upload complete.${Z}";say "  PIN:  ${B}$pin${Z}";say "  File: $n ($(human "$size"))";say "  Link: $HOST/$(enc "$pin")"; }
+download(){ local pin a dir out;head;say "${B}Download${Z}";pin=$(ask "PIN to download (or b to go back): "||true);[ -z "$pin" ]||[ "${pin,,}" = b ]&&return;peek "$pin"||{ err "No file found for PIN '$pin'.";return;};say "";say "Found: ${B}$NAME${Z} ($(human "$SIZE")) ${D}${DATE:-}${Z}";say "  [1] Download to this folder";say "  [2] Choose a destination folder";say "  [b] Back";a=$(choice "Choice: " "1 2 b");[ "$a" = b ]&&return;dir=".";if [ "$a" = 2 ];then dir=$(ask "Destination folder: "||true);dir=$(path "$dir");[ -d "$dir" ]||{ err "That destination folder does not exist.";return;};fi;out=$(free "${dir%/}/$NAME");say "";say "Downloading to ${B}$out${Z}...";save "$out" "$HOST/$(enc "$pin")"&&say "${G}${B}Download complete:${Z} $out"||err "Download failed (HTTP $CODE): ${BODY:-no response}"; }
+menu(){ local c info pins used cap;while :;do request "$HOST/?info=1"&&info="$BODY"||info="";head;say "  [1] Upload a file or folder";say "  [2] Download with a PIN";say "  [q] Quit";if [ -n "$info" ];then IFS=$'\t' read -r pins used cap <<< "$info";say "";say "${D}Storage: $(human "$((cap-used))") free of $(human "$cap") · $pins PIN(s) stored${Z}";fi;c=$(choice "\nChoice: " "1 2 q");case "$c" in 1)upload;;2)download;;q)say "Goodbye.";return;;esac;say "";say "${D}Press Enter to return to the menu...${Z}";read -r _ < "$INPUT"||true;done; }
+usage(){ cat >&2 <<'USAGE'
+dropbin — secure file sharing from a terminal
+  drop                       interactive upload/download
+  drop up PATH [PIN]         upload a file or folder
+  drop get PIN [DIRECTORY]   download a file
+  drop view PIN              print a text file
+  drop rm PIN                delete a PIN
+  drop free                  show remaining storage
+
+DROP_PASS=... skips the password prompt. DROP_HOST=https://... changes host.
+USAGE
+exit 2; }
+script(){ local cmd="$1" p pin send n out pins used cap;shift;case "$cmd" in up|put|upload)p="${1:-}";pin="${2:-}";[ -n "$p" ]||usage;p=$(path "$p");if [ -f "$p" ];then send="$p";elif [ -d "$p" ];then send=$(pack "$p")||exit 1;else err "No such file or folder: $p";exit 1;fi;n=$(basename "$send");transfer -T "$send" -H "X-Name: $n" -H "X-Pin: $pin" "$HOST/up?quiet=1"||{ err "Upload failed (HTTP $CODE): $BODY";exit 1;};pin=$(printf %s "$BODY"|tr -d '\r\n');printf 'PIN: %s\nFile: %s\nLink: %s/%s\n' "$pin" "$n" "$HOST" "$(enc "$pin")";;get|dl|download)pin="${1:-}";[ -n "$pin" ]||usage;peek "$pin"||{ err "No file found for PIN '$pin'.";exit 1;};out=$(path "${2:-.}");[ -d "$out" ]||mkdir -p "$out";out=$(free "${out%/}/$NAME");save "$out" "$HOST/$(enc "$pin")"||{ err "Download failed (HTTP $CODE): $BODY";exit 1;};printf '%s\n' "$out";;view|cat)pin="${1:-}";[ -n "$pin" ]||usage;curl -fsS -H "X-Pass: $PASS" "$HOST/$(enc "$pin")?view=1";;rm|del|delete)pin="${1:-}";[ -n "$pin" ]||usage;request -X DELETE "$HOST/$(enc "$pin")"||{ err "$BODY";exit 1;};printf '%s\n' "$BODY";;free|df|space)request "$HOST/?info=1"||{ err "$BODY";exit 1;};IFS=$'\t' read -r pins used cap <<< "$BODY";printf '%s used, %s free of %s across %s PIN(s)\n' "$(human "$used")" "$(human "$((cap-used))")" "$(human "$cap")" "$pins";;*)usage;;esac; }
+password
+if [ "$#" -gt 0 ];then script "$@";else menu;fi

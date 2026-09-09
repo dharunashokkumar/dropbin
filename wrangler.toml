@@ -1,0 +1,35 @@
+name = "dropbin"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+# The access password. Override it in production without touching this file:
+#   npx wrangler secret put ACCESS_PASSWORD
+# (a secret of the same name wins over this var)
+[vars]
+ACCESS_PASSWORD = "changeme"
+# What the storage meter counts down from. R2's free tier is 10 GB.
+QUOTA_GB = "10"
+# Ceiling for zipping an old multi-file pin on the way out. It is a CPU budget,
+# not a storage one: hashing costs ~1.4 ms per MB and a free-plan Worker gets
+# 10 ms per request. Nothing written by this version needs it.
+ZIP_LIMIT_MB = "5"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "dropbin"
+
+# Serve the CLI helpers as strings baked into the Worker.
+[[rules]]
+type = "Text"
+globs = ["**/*.sh", "**/*.ps1"]
+fallthrough = false
+
+[observability]
+enabled = true
+
+# Wrangler creates the DNS record for this itself; the dharun.dev zone has to
+# already be on the same Cloudflare account.
+[[routes]]
+pattern = "files.dharun.dev"
+custom_domain = true
