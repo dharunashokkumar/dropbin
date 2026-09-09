@@ -1,0 +1,42 @@
+name: Idea
+description: Suggest something — but read the shape of the tool first
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        dropbin does two things: **upload** and **download**. Most of what is
+        missing is missing on purpose, and these will be closed:
+
+        - listing, browsing, searching or indexing what is stored (none exists, anywhere)
+        - zipping on the server (per-byte work does not fit a free-plan Worker)
+        - a third option in either interactive menu
+        - `db login`, a config file or a token cache
+        - a dark mode for the web page
+
+        [CONTRIBUTING.md](https://github.com/dharunashokkumar/dropbin/blob/main/CONTRIBUTING.md)
+        explains why. An idea that keeps the two-operation shape is very welcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is awkward today
+      description: The problem, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like instead
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: shape
+    attributes:
+      label: Does it fit?
+      options:
+        - label: It does not add a way to list, browse or search what is stored.
+        - label: It does not move per-byte work (zipping, hashing) into the Worker.
+        - label: It keeps a pin holding exactly one object.

@@ -1,0 +1,143 @@
+# There is no test suite yet (issue: "Add a test suite"). What CI can do today
+# is exactly what CLAUDE.md documents as verification without a server: parse
+# every script in all five languages, guard the two contracts that break a
+# client silently (LF endings and the __HOST__ placeholder), bundle the Worker,
+# and smoke the published CLI on every platform it claims to support.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: Parse every script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: JavaScript parses (Worker and CLI)
+        run: node --check src/index.js src/ui.js src/util.js && for f in cli/src/*.js cli/bin/*.js; do node --check "$f"; done
+
+      - name: bash client parses
+        run: bash -n src/drop.sh
+
+      - name: PowerShell client parses
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ./src/drop.ps1), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          Write-Host "drop.ps1 parses clean"
+
+  contracts:
+    name: Contracts that break a client silently
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Worker serves these files verbatim and npm ships db.js with a
+      # shebang: a CR breaks drop.sh outright and makes an unrunnable
+      # interpreter line on macOS and Linux. .gitattributes enforces it; this
+      # catches a file that got committed wrong anyway.
+      - name: No CRLF in served or published files
+        run: |
+          bad=$(grep -lU $'\r' src/drop.sh src/drop.ps1 cli/bin/*.js cli/src/*.js || true)
+          if [ -n "$bad" ]; then
+            echo "::error::CR found — these must stay LF (see .gitattributes):"
+            echo "$bad"
+            exit 1
+          fi
+          echo "line endings OK"
+
+      # /cli and /cli.ps1 replace this with the request origin at serve time.
+      # Lose it and every downloaded client points at nothing.
+      - name: __HOST__ placeholder intact
+        run: |
+          for f in src/drop.sh src/drop.ps1; do
+            grep -q '__HOST__' "$f" || { echo "::error file=$f::__HOST__ placeholder is gone"; exit 1; }
+          done
+          echo "placeholder OK"
+
+      # Zero runtime dependencies is a feature of the published package: a
+      # fresh machine needs nothing but Node 18.
+      - name: The db package stays dependency-free
+        run: |
+          node -e '
+            const p = require("./cli/package.json");
+            const deps = Object.keys(p.dependencies || {}).concat(Object.keys(p.peerDependencies || {}));
+            if (deps.length) { console.error("::error::cli/ must stay zero-dependency, found: " + deps.join(", ")); process.exit(1); }
+            console.log("cli/ has no runtime dependencies");
+          '
+
+  worker:
+    name: Worker bundles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Needs no Cloudflare credentials: it bundles and exits.
+      - name: wrangler deploy --dry-run
+        run: npx wrangler deploy --dry-run --outdir dist
+
+  cli:
+    name: db on ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [18, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # Both must work with no server and no password: they are the two
+      # commands that never open a connection.
+      - name: db --help and db --version
+        run: |
+          node cli/bin/db.js --help
+          node cli/bin/db.js --version
+
+      # A menu built on a line-reader spins forever once stdin runs dry. This
+      # asserts the opposite: EOF ends the process instead of redrawing.
+      - name: db exits at end of input instead of looping
+        if: runner.os != 'Windows'
+        run: |
+          set +e
+          timeout 20 node cli/bin/db.js < /dev/null
+          code=$?
+          set -e
+          if [ "$code" = "124" ]; then
+            echo "::error::db did not exit at EOF — the prompt loop is spinning"
+            exit 1
+          fi
+          echo "exited at EOF with $code"
+
+      - name: The package builds
+        working-directory: cli
+        run: npm pack --dry-run

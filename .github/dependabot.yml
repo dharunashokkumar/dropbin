@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Wrangler is the only dependency this repo has (a dev one). The cli/
+  # package has none, deliberately, so there is nothing to watch there.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels: [dependencies]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: ci

@@ -2,6 +2,15 @@
   "name": "dropbin",
   "version": "1.0.0",
   "private": true,
+  "description": "Instant file sharing on one Cloudflare Worker and one R2 bucket. Upload, download, nothing else.",
+  "license": "MIT",
+  "author": "Dharun Ashokkumar",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dharunashokkumar/dropbin.git"
+  },
+  "homepage": "https://github.com/dharunashokkumar/dropbin#readme",
+  "bugs": "https://github.com/dharunashokkumar/dropbin/issues",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

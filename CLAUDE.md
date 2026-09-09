@@ -31,7 +31,9 @@ printf '1\n1\n./notes.txt\n2\nmy-pin\nq\n' | node cli/bin/db.js --no-copy
 #        │ │ └ the path
 #        │ └ 1 = file, 2 = folder
 #        └ 1 = upload, 2 = download
-node cli/bin/db.js < /dev/null      # must print "Bye." and exit, never redraw
+node cli/bin/db.js < /dev/null      # must exit at once, never redraw: with no
+                                    # DROP_PASS that is "A password is
+                                    # required." (exit 1), and with one it is "Bye."
 ```
 
 `src/drop.sh` reads from `/dev/tty` whenever it can open one, so piping drives
@@ -40,6 +42,17 @@ it only on a machine without a terminal; test that client by hand instead.
 `node --check src/*.js cli/src/*.js` and `bash -n src/drop.sh` catch syntax
 errors without a server. For the PowerShell script:
 `[System.Management.Automation.Language.Parser]::ParseFile(path,[ref]$null,[ref]$e)`.
+
+`.github/workflows/ci.yml` runs exactly those on every push, plus the two
+contracts that break a client silently rather than loudly — no CR in
+`drop.sh` / `drop.ps1` / `cli/**` (`.gitattributes` says LF; CI proves it) and
+`__HOST__` still present in both shell clients — plus the dry-run bundle,
+`cli/` having no runtime dependencies, and `db --help` / `db --version` /
+`db < /dev/null` on Linux, macOS and Windows against Node 18 and 22. Nothing in
+CI needs a Cloudflare account. `publish.yml` releases `cli/` to npm on a `v*`
+release (needs `NPM_TOKEN`); `deploy.yml` is manual only (needs
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`) — deliberately, so a push
+never replaces what is live.
 
 Stopping `wrangler dev` leaves `workerd.exe` and a `node ... wrangler.js dev`
 process alive on Windows; they keep `.wrangler/state` locked. Kill both before

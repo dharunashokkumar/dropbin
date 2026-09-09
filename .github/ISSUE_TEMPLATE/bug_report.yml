@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in the Worker, the web page or one of the clients does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems do not belong here — please use
+        [private reporting](https://github.com/dharunashokkumar/dropbin/security/advisories/new)
+        instead. See [SECURITY.md](https://github.com/dharunashokkumar/dropbin/blob/main/SECURITY.md).
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - The Worker (an HTTP response, a route, curl)
+        - The web page
+        - "`db` (the npm package)"
+        - "`drop.sh` (curl … /cli)"
+        - "`drop.ps1` (PowerShell client)"
+        - Deploying it
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: |
+        db up ./holiday.png
+        → expected a pin, got: upload failed (HTTP 413)
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        The exact command, with the password removed. If it is a client, a
+        piped session is ideal — every prompt reads a line, so a whole session
+        is one string.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`db --version`, or the commit you deployed."
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS, shell, and Node version if a client is involved.
+      placeholder: Windows 11, Git Bash, Node 20.11
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I am running my own deployment, and the password is not still `changeme`.
+        - label: I checked this is not one of the documented traps in `CLAUDE.md`.

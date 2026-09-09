@@ -1,5 +1,9 @@
 # dropbin
 
+[![CI](https://github.com/dharunashokkumar/dropbin/actions/workflows/ci.yml/badge.svg)](https://github.com/dharunashokkumar/dropbin/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dropbin)](https://www.npmjs.com/package/dropbin)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Instant file sharing on one Cloudflare Worker + one R2 bucket.
 
 There are two things you can do — **upload** and **download** — and the whole
@@ -286,3 +290,20 @@ cannot act on the origin while it is being looked at.
 - The `db` tool is a second npm package in `cli/`, published as `dropbin`. It
   is not bundled into the Worker — only `src/drop.sh` and `src/drop.ps1` are.
 - **Change anything in this tool and update `CLAUDE.md` (and this README) to match.**
+
+## Contributing
+
+Read [`CLAUDE.md`](CLAUDE.md) first — it is the architecture, and it explains
+why most of the obvious features are deliberately absent. Then
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for how to set up, what to verify, and
+which changes will not be taken.
+
+Found a security problem? Do not open an issue —
+[report it privately](https://github.com/dharunashokkumar/dropbin/security/advisories/new).
+[`SECURITY.md`](SECURITY.md) also covers the threat model and how to harden a
+deployment: set a real password, prefer `X-Pass:` over `?p=`, and put a rate
+limit in front of it.
+
+## License
+
+[MIT](LICENSE) © Dharun Ashokkumar
