@@ -69,7 +69,10 @@ Changing it invalidates the `dp` cookie in every browser and every outstanding
 It gates everything except the two clients (`/cli`, `/cli.ps1`), the two
 installers (`/install.sh`, `/install.ps1`), `/robots.txt` and the favicon.
 Accepted four ways: `?p=`, an `X-Pass:` header, HTTP basic auth, or the `dp`
-cookie the web login sets (one year).
+cookie the web login sets (one year). Wrong-password attempts wait 250 ms and
+are limited to 20 per minute for each client IP; further attempts get HTTP 429
+until the minute is up. Use a long password: the limit slows guessing but is
+not a replacement for one.
 
 ### The storage meter
 

@@ -88,10 +88,11 @@ What it does **not** defend, by design:
   logs — and `[observability]` is enabled in `wrangler.toml`. Use `?p=` for
   throwaway curl against a test instance, not in anything you paste around.
 
-- **Put a rate limit in front of it.** The Worker does not throttle password
-  attempts. A Cloudflare WAF rate-limiting rule on the hostname (say, 20
-  requests per minute per IP with a 401 response) turns a single shared password
-  from brute-forceable into merely guessable. Choose a long password.
+- **Password attempts are slowed and limited.** Wrong passwords wait 250 ms,
+  and the Worker allows at most 20 attempts per minute for each client IP before
+  replying with HTTP 429. This is a per-Cloudflare-location limit, so it slows
+  guessing rather than making a weak password safe. Choose a long password; a
+  Cloudflare WAF rule can provide an additional edge limit.
 
 - **Deploy on a subdomain, not the apex.** You are serving files people upload.
   A dedicated `files.example.com` keeps the `dp` cookie and any sandbox escape
@@ -114,6 +115,5 @@ file; anything that leaks the password out of the Worker or the clients; a
 supply-chain problem in the `dropbin` npm package.
 
 Out of scope: anything that requires the password already; brute-forcing a weak
-password you chose; guessing a pin *with* the password; missing rate limiting on
-a deployment with no WAF rule (documented above); denial of service by uploading
-until the bill hurts; a deployment still running `changeme`.
+password you chose; guessing a pin *with* the password; denial of service by
+uploading until the bill hurts; a deployment still running `changeme`.

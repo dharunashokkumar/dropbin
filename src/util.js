@@ -54,6 +54,12 @@ export function rawPass(req, url) {
   return null;
 }
 
+// A bare request should show the login page without consuming an attempt. An
+// invalid password or cookie, on the other hand, is a password attempt.
+export function authAttempt(req, url) {
+  return rawPass(req, url) !== null || cookie(req, "dp") !== null;
+}
+
 export async function authed(req, url, env) {
   const want = env.ACCESS_PASSWORD || "changeme";
   const raw = rawPass(req, url);

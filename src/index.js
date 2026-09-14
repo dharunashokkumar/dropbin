@@ -24,7 +24,7 @@
 // for one pin and read-only, the `?k=` a share link carries.
 
 import {
-  BASE, authed, cleanName, csize, eq, fmt, guessType, hsize, html, json, newPin,
+  BASE, authAttempt, authed, cleanName, csize, eq, fmt, guessType, hsize, html, json, newPin,
   pinItems, pinOk, quota, shared, text, token, usage, when, zipLimit, zipStream,
 } from "./util.js";
 import { getPage, homePage, loginPage, uploadPage, viewPage } from "./ui.js";
@@ -54,6 +54,27 @@ function needAuth(url, f) {
     "401 — password required\n\n" +
     '  curl "' + url.origin + url.pathname + '?p=YOUR_PASSWORD"\n' +
     '  curl -H "X-Pass: YOUR_PASSWORD" ' + url.origin + url.pathname + "\n", 401);
+}
+
+function pause(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+async function authAllowed(req, env) {
+  const key = req.headers.get("cf-connecting-ip") || "local";
+  const limited = await env.AUTH_ATTEMPTS.limit({ key });
+  await pause(250);
+  return limited.success;
+}
+
+function tooManyAttempts(f, next = "/") {
+  const message = "Too many password attempts. Try again in a minute.";
+  if (f === "html") return html(loginPage(next, message), 429, { "retry-after": "60" });
+  if (f === "json") {
+    return new Response(JSON.stringify({ error: message }, null, 2), {
+      status: 429,
+      headers: { ...BASE, "content-type": "application/json; charset=utf-8", "retry-after": "60" },
+    });
+  }
+  return text(message, 429, { "retry-after": "60" });
 }
 
 function gone(f, what) {
@@ -311,7 +332,10 @@ async function route(req, env) {
     }
     if (!next.startsWith("/")) next = "/";
     const want = env.ACCESS_PASSWORD || "changeme";
-    if (!eq(pass, want)) return html(loginPage(next, true), 401);
+    if (!eq(pass, want)) {
+      if (!(await authAllowed(req, env))) return tooManyAttempts("html", next);
+      return html(loginPage(next, "Wrong password."), 401);
+    }
     const secure = url.protocol === "https:" ? " Secure;" : "";
     return new Response(null, {
       status: 303,
@@ -335,6 +359,7 @@ async function route(req, env) {
   if (!(await authed(req, url, env))) {
     const one = segs.length === 1 ? segs[0] : "";
     if (!one || !pinOk(one) || RESERVED.has(one.toLowerCase()) || !(await shared(url, env, one))) {
+      if (authAttempt(req, url) && !(await authAllowed(req, env))) return tooManyAttempts(f);
       return needAuth(url, f);
     }
     if (req.method !== "GET" && req.method !== "HEAD") {
