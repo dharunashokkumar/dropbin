@@ -191,7 +191,9 @@ somebody else's `db` survives.
 
 **Auth** (`util.js`): the password arrives as `?p=`, `X-Pass:`, HTTP basic, or
 the `dp` cookie. The cookie stores `sha256("dropbin:" + password)`, never the
-password, and comparison is length-checked constant time. Only `/cli`,
+password, and comparison is length-checked constant time. A wrong password or
+cookie waits 250 ms and counts against `AUTH_ATTEMPTS` (20 per minute per client
+IP); a request without credentials merely receives the login page. Only `/cli`,
 `/cli.ps1`, `/install.sh`, `/install.ps1`, `/robots.txt` and `/favicon.ico`
 skip the gate.
 

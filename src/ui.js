@@ -225,13 +225,13 @@ function win(title, close, body, closeLabel = "close", wide = false) {
     '</div><div class="body">' + body + "</div></div>";
 }
 
-export function loginPage(next, bad) {
+export function loginPage(next, error = "") {
   return shell("dropbin", win("dropbin", "/", `
     <form method="post" action="/api/login">
       <p class="lab">Password</p>
       <input type="password" name="pass" autofocus autocomplete="current-password">
       <input type="hidden" name="next" value="${esc(next || "/")}">
-      ${bad ? '<p class="err" style="margin-top:10px">Wrong password.</p>' : ""}
+      ${error ? '<p class="err" style="margin-top:10px">' + error + "</p>" : ""}
       <hr>
       <div class="row"><button type="submit">OK</button></div>
     </form>`));

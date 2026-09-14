@@ -21,6 +21,15 @@ ZIP_LIMIT_MB = "5"
 # never asked for one; db itself asks for a week.
 SHARE_HOURS = "720"
 
+# Slow repeated wrong password guesses without adding a database or other store.
+[[ratelimits]]
+name = "AUTH_ATTEMPTS"
+namespace_id = "1"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "dropbin"
