@@ -28,6 +28,7 @@ import {
   pinItems, pinOk, quota, shared, text, token, usage, when, zipLimit, zipStream,
 } from "./util.js";
 import { getPage, homePage, loginPage, uploadPage, viewPage } from "./ui.js";
+import { bucket } from "./s3.js";
 import shScript from "./drop.sh";
 import psScript from "./drop.ps1";
 import shInstall from "../install.sh";
@@ -382,9 +383,11 @@ async function route(req, env) {
 
 export default {
   async fetch(req, env) {
-    if (!env.BUCKET) return text("R2 bucket binding 'BUCKET' is missing — check wrangler.toml", 500);
+    if (!env.S3_ENDPOINT || !env.S3_BUCKET || !env.S3_KEY_ID || !env.S3_SECRET) {
+      return text("storage is not configured — set S3_ENDPOINT, S3_BUCKET, S3_KEY_ID and S3_SECRET (see workerd.capnp)", 500);
+    }
     try {
-      return await route(req, env);
+      return await route(req, { ...env, BUCKET: bucket(env) });
     } catch (e) {
       return text("500 — " + (e && e.message ? e.message : String(e)), 500);
     }

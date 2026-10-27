@@ -7,14 +7,15 @@
 export const APP = "dropbin";
 export const te = new TextEncoder();
 
-// How much a single legacy ?zip=1 may hash. A CPU budget, not a size limit:
-// ~1.4 ms per MB against the free plan's 10 ms per request.
+// How much a single legacy multi-file pin may zip on the way out. The zip is
+// built in memory, one file at a time, at ~1.4 ms of CRC per MB.
 export function zipLimit(env) {
   const mb = Number(env.ZIP_LIMIT_MB);
   return (Number.isFinite(mb) && mb > 0 ? mb : 5) * 1024 * 1024;
 }
 
-// The storage the meter counts down from. R2's free tier is 10 GB.
+// The storage the meter counts down from. A display, not a lock: set the same
+// number as a quota on the bucket if it has to hold.
 export function quota(env) {
   const gb = Number(env.QUOTA_GB);
   return (Number.isFinite(gb) && gb > 0 ? gb : 10) * 1024 * 1024 * 1024;
@@ -274,8 +275,8 @@ export function icon(name) {
 // Only the legacy path uses this: pins written by older versions hold several
 // objects, and they come back out as one zip. New uploads arrive already packed.
 
-// CRC32, slice-by-8. The byte-at-a-time loop costs ~3.4 ms per MB and a Worker
-// on the free plan gets 10 ms per request; this one costs ~1.4 ms.
+// CRC32, slice-by-8. The byte-at-a-time loop costs ~3.4 ms per MB; this one
+// costs ~1.4 ms.
 let TABS = null;
 function crcTables() {
   if (TABS) return TABS;

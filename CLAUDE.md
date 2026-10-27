@@ -5,12 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```sh
-npm run dev                      # wrangler dev on 127.0.0.1:8787, R2 simulated on disk
-npm run deploy                   # deploy to Cloudflare
-npm run logs                     # wrangler tail
-npx wrangler deploy --dry-run --outdir /tmp/build   # typecheck-ish: bundles without deploying
-npx wrangler secret put ACCESS_PASSWORD             # set the live password
-npx wrangler secret list                            # [] means it is still changeme
+npm install                      # workerd, the only dependency (pinned)
+npm start                        # workerd serve workerd.capnp on *:8787
+#  needs ACCESS_PASSWORD, S3_ENDPOINT, S3_BUCKET, S3_REGION, S3_KEY_ID, S3_SECRET
+#  in the environment: point them at a throwaway bucket on any S3 server
 
 cd cli && npm pack                                  # build what people install
 npm i -g --prefix /tmp/gt cli/dropbin-*.tgz         # try the bin shims safely
@@ -23,7 +21,7 @@ gh release create v1.1.0 --title "dropbin 1.1.0" --notes-file NOTES.md \
   cli/dist/dropbin.tgz cli/dist/dropbin.zip       # by hand, never a workflow
 ```
 
-There is no test suite. Verification is manual against `npm run dev`: drive the
+There is no test suite. Verification is manual against `npm start`: drive the
 HTTP surface with `curl`, and the clients with piped input. Every prompt in
 every client reads a *line*, so a whole session is one string. `db` is the easy
 one to script, because it reads stdin:
@@ -53,34 +51,45 @@ errors without a server. For the PowerShell script:
 contracts that break a client silently rather than loudly — no CR in
 `drop.sh` / `drop.ps1` / `install.*` / `cli/**` (`.gitattributes` says LF; CI
 proves it) and `__HOST__` still present in all four served scripts — plus the
-dry-run bundle, `cli/` having no runtime dependencies, and `db --help` /
+workerd actually serving the config (it must load, answer `/robots.txt`, refuse
+`/?info=1` without the password and hand out `/cli` and `/install.sh` with the
+right origin — no S3 needed for any of that), `cli/` having no runtime
+dependencies, and `db --help` /
 `db --version` / `db < /dev/null` on Linux, macOS and Windows against Node 18
 and 22. The `install` job builds the release archives out of the checkout and
 runs the real installer against them on all three, then uninstalls and checks
-nothing was left behind. Nothing in CI needs a Cloudflare account.
+nothing was left behind. Nothing in CI needs an account or a bucket.
 
-`ci.yml` is the only workflow, and it only ever *checks*. Deploying
-(`npx wrangler deploy`), cutting a GitHub release (`gh release create`) and
-releasing `db` (`cd cli && npm publish`) are run by hand from a terminal —
-deliberately, so nothing in this repository holds a Cloudflare or npm credential
-and no push can replace what is live or what people install. Do not add a
-workflow that deploys, releases or publishes.
-
-Stopping `wrangler dev` leaves `workerd.exe` and a `node ... wrangler.js dev`
-process alive on Windows; they keep `.wrangler/state` locked. Kill both before
-deleting that directory.
+`ci.yml` is the only workflow, and it only ever *checks*. Deploying (copying
+`workerd.capnp` and `src/` to the box and restarting workerd), cutting a GitHub
+release (`gh release create`) and releasing `db` (`cd cli && npm publish`) are
+run by hand from a terminal — deliberately, so nothing in this repository holds
+a server, S3 or npm credential and no push can replace what is live or what
+people install. Do not add a workflow that deploys, releases or publishes.
 
 ## Architecture
 
-One Worker (`src/index.js`) over one R2 bucket. No framework, no runtime
-dependencies, and no build step beyond Wrangler's bundler.
+One Worker (`src/index.js`) run by `workerd` over one S3 bucket. No framework,
+no runtime dependencies and no build step: `workerd.capnp` lists every module
+and embeds it as it sits in `src/`, so what is in the repository is exactly what
+runs. Add a module and it has to be added there too, or the import fails at
+startup.
+
+**Storage is five calls.** `src/s3.js` is `get` / `head` / `put` / `delete` /
+`list` over any S3 server — path-style URLs, SigV4 through `crypto.subtle` —
+and it hands back objects in the shape the rest of the code reads (`key`,
+`size`, `uploaded`, `httpMetadata.contentType`, plus `body`, `range` and
+`httpEtag` on a GET). The router wraps it in as `env.BUCKET` per request, so
+`index.js` and `util.js` never see S3. Keep it that way: new storage needs go
+into `s3.js` as one of those calls, not as raw `fetch()` in the router. The only
+thing stored per object besides the bytes is the content type.
 
 **There are two operations, and the whole design follows from that.** Upload
 and download. No listing exists anywhere — not in the UI, not in the CLI, not
 as an endpoint. The only aggregate the tool will report is `usage()`: bytes
 used and how many pins exist. Do not add a browse, search or index path.
 
-**A pin holds exactly one object.** The R2 key is `PIN/name`, so resolving a
+**A pin holds exactly one object.** The S3 key is `PIN/name`, so resolving a
 pin is one `list({ prefix: pin + "/" })` and `pinFind()` collapses the result to
 one downloadable thing. A folder is zipped *by the client* before it is sent,
 so it arrives as one object like everything else. Uploading to a pin that
@@ -90,9 +99,11 @@ other path stay this short.
 **Folders are never zipped by the Worker.** The browser builds the zip in
 `ui.js`'s `JS` blob and the shell/PowerShell clients shell out to
 `zip`/`tar`/`Compress-Archive`. This is deliberate: CRC32 in JS costs ~1.4 ms
-per MB and a free-plan Worker gets 10 ms of CPU per request, so a server-side
-zip breaks somewhere north of 7 MB. `zipStream()` in `util.js` survives only for
-the legacy path below. Keep per-byte work out of the Worker.
+per MB, and a server-side zip would hold the whole folder in memory on a box
+that also has to answer everyone else. (It began as a hard limit — a free-plan
+Cloudflare Worker gets 10 ms of CPU per request — and stays as a design rule.)
+`zipStream()` in `util.js` survives only for the legacy path below. Keep
+per-byte work out of the Worker.
 
 **One route serves three audiences.** `fmt(req, url)` picks `html` / `text` /
 `json` from `Accept` (or `?json=1`), so `GET /4821` shows a browser the file
@@ -131,8 +142,8 @@ link is built with `encodeURIComponent`.
 
 **`db` is the client people install, and `cli/` is its own npm package.**
 Published as `dropbin` with two bins (`db` and `dropbin`), plain Node 18+, zero
-dependencies, no build step, and invisible to Wrangler — the `[[rules]]` block
-below only pulls in the two served scripts. It speaks the same surface as
+dependencies, no build step, and invisible to workerd — `workerd.capnp` only
+embeds `src/` and the two installers. It speaks the same surface as
 everything else: `GET /?info=1` doubles as the password check and the storage
 read, `PUT /up?quiet=1` with `X-Name`/`X-Pin` uploads, `GET /PIN` downloads,
 `DELETE /PIN` reclaims. Change `?info=1` and three clients break, not two.
@@ -157,9 +168,10 @@ its output differs from ours while both are valid; compare with
 or the diff is meaningless.
 
 **The two shell CLIs are served, not shipped.** `src/drop.sh` and `src/drop.ps1` are
-imported as strings via the `[[rules]]` `type = "Text"` block in
-`wrangler.toml`, and `__HOST__` is replaced with the request origin at `/cli`
-and `/cli.ps1`. Keep that placeholder intact.
+embedded as `text` modules in `workerd.capnp` (the module names keep their
+paths, `src/drop.sh` and `install.sh`, so `index.js`'s relative imports resolve),
+and `__HOST__` is replaced with the request origin at `/cli` and `/cli.ps1`.
+Keep that placeholder intact.
 
 **So are the two installers, and they carry the same placeholder.**
 `install.sh` and `install.ps1` sit at the repository root — that is where people
@@ -208,7 +220,7 @@ one may be signed. `db` asks for a week.
 
 **Legacy pins.** Versions before this one wrote several objects under one pin.
 `pinFind()` still detects that and hands them back as a single zip through
-`zipStream()` (capped by `zipLimit(env)`, a CPU budget), and `/PIN/sub/file`
+`zipStream()` (capped by `zipLimit(env)`: the zip is built in memory), and `/PIN/sub/file`
 still resolves. Nothing written today produces such a pin.
 
 ## Conventions
@@ -244,27 +256,28 @@ still resolves. Nothing written today produces such a pin.
 
 ## Traps worth knowing
 
-- **A secret does not override a `[vars]` entry of the same name.** Wrangler
-  refuses to create it at all — `Binding name 'ACCESS_PASSWORD' already in use
-  [code: 10053]` — so a password listed in `wrangler.toml` is the password,
-  and `wrangler secret put` looks like it should fix that but cannot. That is
-  why `ACCESS_PASSWORD` is absent from `[vars]` and the `|| "changeme"`
-  fallback lives in `util.js` and `index.js` instead. When a client reports a
-  correct password rejected, check the deployment before the client:
-  `curl -o /dev/null -w '%{http_code}' -H "X-Pass: PASS" https://host/?info=1`
-  and `npx wrangler secret list` (an empty `[]` means nothing was ever set).
-- **`wrangler secret put` reads stdin when it is not a tty, and an empty value
-  is accepted silently** — it prints the same "✨ Success!" and `secret list`
-  then shows the name, so everything looks set while `env.ACCESS_PASSWORD` is
-  `""`, falsy, and the `|| "changeme"` fallback quietly takes over. Run it as
-  `printf 'PASS' | npx wrangler secret put ACCESS_PASSWORD` from any wrapped
-  shell, and prove it with the curl above rather than with `secret list`, which
-  only ever shows names.
-- **`wrangler dev` serves `/cli` pointed at the custom-domain route**, not at
-  localhost: `url.origin` is the `route` pattern from `wrangler.toml` even when
-  you fetched from `127.0.0.1:8787`, so a locally downloaded `drop` talks to
-  *production*. Always `export DROP_HOST=http://127.0.0.1:8787` when testing the
-  clients.
+- **An unset `ACCESS_PASSWORD` is `changeme`, silently.** `fromEnvironment`
+  hands the Worker `undefined` for a variable that is not set, and an empty one
+  is just as falsy, so the `|| "changeme"` fallback in `util.js` and `index.js`
+  takes over either way and nothing logs it. When a client reports a correct
+  password rejected — or a wrong one accepted — check the deployment before the
+  client: `curl -o /dev/null -w '%{http_code}' -H "X-Pass: PASS" https://host/?info=1`.
+  With systemd, a value with `$`, `\` or quotes in it wants quoting in the
+  `EnvironmentFile`.
+- **Without `X-Forwarded-Proto` every link says `http://`.** workerd builds
+  `request.url` from the connection it accepted, so behind a TLS-terminating
+  proxy `url.origin` — which is what `/cli`, `/install.*`, share links and every
+  pin URL are built from — is plain http unless the proxy sends the header the
+  socket trusts (`forwardedProtoHeader` in `workerd.capnp`).
+- **The S3 key is the pin and the name, verbatim**, so a pin or a filename can
+  hold spaces, `+`, `&`, `%`, `#`, `?` and any Unicode, and `s3.js` encodes each
+  path segment the RFC 3986 way SigV4 signs (stricter than
+  `encodeURIComponent`: `!'()*` too). A non-ASCII `X-Pin` / `X-Name` *header* is
+  read as Latin-1 bytes by the runtime, which is why the clients send those as
+  query parameters or plain ASCII; `?pin=` and `?name=` carry Unicode intact.
+- **Testing the clients against a local server:** always
+  `export DROP_HOST=http://127.0.0.1:8787` — the default host in
+  `cli/src/api.js` is a real deployment.
 - `curl -T` appends the local filename only when the URL ends in `/` **and**
   has no query string. Hence the documented `https://:$PASS@host/up/` form
   (basic auth, no query) and the `X-Name` / `X-Pin` headers.
@@ -314,11 +327,11 @@ CLAUDE.md is worse than none.
 their machine.** No names, no email addresses, no real hostnames or account
 identifiers in prose, no local paths (`C:\Users\...`, `/home/...`), no "the user
 asked for", no "my laptop", no screenshots of a desktop. Write every instruction
-for whoever is reading it: "your deployment", "the `route` in `wrangler.toml`",
+for whoever is reading it: "your deployment", "the socket in `workerd.capnp`",
 `https://host/`, `example.com`. Platform notes are fine — Windows and Git Bash
 behave the way they behave for everyone — as long as they describe the platform
 and not a particular machine. The identifying details that must exist are
 exactly three, all of them functional: the copyright line in `LICENSE`, the
 `author` / `repository` fields npm requires in the two `package.json` files, and
-the deployment's own hostname in `wrangler.toml` and `cli/src/api.js`. Nothing
+the deployment's own hostname as the default in `cli/src/api.js`. Nothing
 else.

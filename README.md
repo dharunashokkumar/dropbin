@@ -4,7 +4,8 @@
 [![npm](https://img.shields.io/npm/v/dropbin)](https://www.npmjs.com/package/dropbin)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Instant file sharing on one Cloudflare Worker + one R2 bucket.
+Instant file sharing from one [workerd](https://github.com/cloudflare/workerd)
+process and one S3 bucket, on a box you run.
 
 There are two things you can do — **upload** and **download** — and the whole
 tool is built around only those two. Uploading gets you a **PIN**; anyone with
@@ -26,42 +27,39 @@ zip — and downloading gives you that zip straight back.
  1 or 2 to choose, q to quit
 ```
 
-## Deploy
+## Run it
+
+You need two things: an S3 bucket and a key that can read and write it, and
+somewhere to run `workerd`. Any S3 server works —
+[Garage](https://garagehq.deuxfleurs.fr/), SeaweedFS, MinIO, AWS — as long as it
+answers path-style requests (`ENDPOINT/bucket/key`), which they all do.
 
 ```sh
-npm install
-npx wrangler login                       # opens a browser, once
-npx wrangler r2 bucket create dropbin    # needs R2 enabled on the account
-npx wrangler deploy
+npm install                                  # workerd, the only dependency
+export ACCESS_PASSWORD='something long'
+export S3_ENDPOINT=http://127.0.0.1:3900 S3_BUCKET=dropbin S3_REGION=garage
+export S3_KEY_ID=… S3_SECRET=…
+npm start                                    # workerd serve workerd.capnp → :8787
 ```
 
-That prints a `https://dropbin.<you>.workers.dev` URL, which already works.
+[`workerd.capnp`](workerd.capnp) is the whole deployment: the modules, the
+bindings, the port. Secrets and the endpoint come from the environment, so the
+file holds none. Put it behind anything that terminates TLS — a reverse proxy,
+a tunnel — and pass `X-Forwarded-Proto: https`: the socket trusts that header,
+so the links dropbin builds, and the clients it hands out, say `https://`.
+Running it as a service is a systemd unit with `EnvironmentFile=` and
+`ExecStart=workerd serve /path/to/workerd.capnp`.
 
-For your own domain, set `[[routes]]` in `wrangler.toml` and deploy again:
-
-```toml
-[[routes]]
-pattern = "files.example.com"
-custom_domain = true
-```
-
-The zone has to be on the same Cloudflare account; Wrangler makes the DNS
-record itself.
+dropbin fetches nothing but the S3 endpoint, and the config only lets it reach
+that: its outbound network allows public and private addresses because the
+store is usually on the LAN. Tighten `storage` to the store's address if you
+like.
 
 ### The password
 
-`changeme` until you set one — that fallback is in the code, not in
-`wrangler.toml`, which deliberately keeps `ACCESS_PASSWORD` out of `[vars]`:
-
-```sh
-npx wrangler secret put ACCESS_PASSWORD    # takes effect at once, no redeploy
-```
-
-A secret does **not** override a var of the same name; Wrangler refuses to
-create one, with `Binding name 'ACCESS_PASSWORD' already in use`. So if you have
-added the var back, remove it and `npx wrangler deploy` before setting the
-secret. Check what is live with `npx wrangler secret list` — an empty `[]` means
-the password is still `changeme`, whatever you think you set.
+`changeme` until you set `ACCESS_PASSWORD` — that fallback is in the code. If
+`curl -s -o /dev/null -w '%{http_code}' -H "X-Pass: changeme" https://host/?info=1`
+says `200`, nobody set it.
 
 Changing it invalidates the `dp` cookie in every browser and every outstanding
 `db open` / `db qr` link, since those are signed with the password as the key.
@@ -73,9 +71,9 @@ cookie the web login sets (one year).
 
 ### The storage meter
 
-`QUOTA_GB` in `wrangler.toml` is what the meter counts down from — 10 GB, to
-match R2's free tier. It is a display figure, not an enforced cap; R2 will keep
-accepting uploads past it and start billing.
+`QUOTA_GB` in `workerd.capnp` is what the meter counts down from — 10 GB by
+default. It is a display figure, not an enforced cap; set the same number as a
+quota on the bucket if it has to hold.
 
 ## The `db` command
 
@@ -276,7 +274,7 @@ random 4-digit pin or one you type, then it sends and shows you the pin.
 with `Download`, `View` and `Close`.
 
 It works with JavaScript off, except for folders: a folder is zipped in the
-browser (STORE, no compression) so the Worker never spends CPU on it, and that
+browser (STORE, no compression) so the server never holds a folder in memory, and that
 needs JS. With JS off the folder option is greyed out and single files still
 upload through a plain form post.
 
@@ -308,7 +306,7 @@ password — a browser, or a phone pointed at a code — so they sign one instea
 of just linking it. `?k=` is an expiry and an HMAC of the pin, keyed on the
 password: nothing is stored anywhere, it opens exactly that one pin, it is
 read-only (a `DELETE` or an upload with it is refused), and it lasts a week.
-`SHARE_HOURS` in `wrangler.toml` caps how far ahead one may be signed.
+`SHARE_HOURS` in `workerd.capnp` caps how far ahead one may be signed.
 
 A browser landing on a pin gets the file on screen — an image, a video, text,
 a PDF — with a Download button it has to be asked for. Uploaded files still
@@ -324,18 +322,19 @@ cannot act on the origin while it is being looked at.
 - **Uploading to a pin you have already used replaces what was there.** One
   pin, one thing.
 - Files live until you delete them — there is no expiry job.
-- Everything here fits the free plans: Workers Free (100k requests/day) and R2
-  Free (10 GB, 1M class-A + 10M class-B ops a month).
-- Free-plan Workers cap a request body at 100 MB, so that is the per-upload
-  ceiling. Uploads, downloads and the meter are pure I/O, with no CPU ceiling —
-  which is exactly why folders are zipped by the client and never by the
-  Worker.
+- An upload is read into memory before it is stored, so the process needs
+  roughly the largest upload in RAM. A proxy in front usually sets the real
+  ceiling first: Cloudflare's tunnel and proxy, for one, cap a request body at
+  100 MB on the free plan. Downloads stream and cost nothing.
+- Folders are zipped by the client and never by the server, which keeps
+  per-byte work — and a whole folder in memory — off the box.
 - Uploaded files are served with `Content-Security-Policy: sandbox` and
   `nosniff`, so an uploaded `.html` or `.svg` cannot act on this origin.
 - Pins written by older versions held several files. Those still work: they
   come back out as one zip, capped at `ZIP_LIMIT_MB` of hashing, and the
   individual files stay reachable at `/PIN/path/to/file`.
-- Local dev: `npm run dev`. R2 is simulated on disk; nothing touches the cloud.
+- Local dev: `npm start` with the `S3_*` variables pointed at a throwaway
+  bucket. There is nothing to build: `workerd.capnp` embeds `src/` as it is.
 - The `db` tool is a second npm package in `cli/`, published as `dropbin`. It
   is not bundled into the Worker — only the two clients and the two installers
   are, as text with `__HOST__` swapped for the request origin on the way out.
@@ -348,7 +347,7 @@ cannot act on the origin while it is being looked at.
 
 Read [`CLAUDE.md`](CLAUDE.md) first — it is the architecture, and it explains
 why most of the obvious features are deliberately absent, what CI checks, and
-how to verify a change against `npm run dev` (there is no test suite). Deploys,
+how to verify a change against `npm start` (there is no test suite). Deploys,
 GitHub releases and npm publishes are run by hand, not by a workflow.
 
 Found a security problem? Do not open an issue —

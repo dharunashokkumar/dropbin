@@ -2,7 +2,7 @@
   "name": "dropbin",
   "version": "1.0.0",
   "private": true,
-  "description": "Instant file sharing on one Cloudflare Worker and one R2 bucket. Upload, download, nothing else.",
+  "description": "Instant file sharing from one workerd process and one S3 bucket. Upload, download, nothing else.",
   "license": "MIT",
   "author": "Dharun Ashokkumar",
   "repository": {
@@ -13,11 +13,9 @@
   "bugs": "https://github.com/dharunashokkumar/dropbin/issues",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "logs": "wrangler tail"
+    "start": "workerd serve workerd.capnp"
   },
   "devDependencies": {
-    "wrangler": "^4.129.1"
+    "workerd": "1.20261013.1"
   }
 }

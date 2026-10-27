@@ -1,6 +1,6 @@
-// Client-side zip. A folder becomes one object before it is sent, because a
-// free-plan Worker gets 10 ms of CPU per request and CRC32 alone costs ~1.4 ms
-// per MB — the server must never see a folder.
+// Client-side zip. A folder becomes one object before it is sent: CRC32 alone
+// costs ~1.4 ms per MB and a folder zipped on the server would sit in its
+// memory whole — the server must never see a folder.
 //
 // Written with node:zlib and nothing else, so `db` does not care whether zip,
 // tar or Compress-Archive happens to be installed. Deflate is streamed and the

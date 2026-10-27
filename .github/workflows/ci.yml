@@ -1,7 +1,7 @@
 # There is no test suite. What CI can do today
 # is exactly what CLAUDE.md documents as verification without a server: parse
 # every script in all five languages, guard the two contracts that break a
-# client silently (LF endings and the __HOST__ placeholder), bundle the Worker,
+# client silently (LF endings and the __HOST__ placeholder), serve the Worker,
 # smoke the published CLI on every platform it claims to support, and install it
 # from a release built out of this checkout, the way install.sh and install.ps1
 # will on someone's machine.
@@ -32,7 +32,7 @@ jobs:
           node-version: 20
 
       - name: JavaScript parses (Worker and CLI)
-        run: node --check src/index.js src/ui.js src/util.js && for f in cli/src/*.js cli/bin/*.js; do node --check "$f"; done
+        run: for f in src/*.js cli/src/*.js cli/bin/*.js; do node --check "$f"; done
 
       - name: bash client parses
         run: bash -n src/drop.sh
@@ -99,12 +99,11 @@ jobs:
           '
 
   worker:
-    name: Worker bundles
+    name: workerd serves the config
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      # Wrangler 4 refuses to start on anything below Node 22.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -112,9 +111,27 @@ jobs:
 
       - run: npm ci
 
-      # Needs no Cloudflare credentials: it bundles and exits.
-      - name: wrangler deploy --dry-run
-        run: npx wrangler deploy --dry-run --outdir dist
+      # workerd.capnp names every module; a missing one or a bad import fails
+      # at startup, which is what this catches. Nothing here needs S3: the
+      # routes below answer before storage is touched, and the endpoint points
+      # at a port nothing listens on.
+      - name: Start workerd
+        run: |
+          ACCESS_PASSWORD=ci S3_ENDPOINT=http://127.0.0.1:9 S3_BUCKET=ci S3_REGION=ci             S3_KEY_ID=ci S3_SECRET=ci npx workerd serve workerd.capnp > workerd.log 2>&1 &
+          for i in $(seq 1 30); do curl -s -o /dev/null http://127.0.0.1:8787/robots.txt && exit 0; sleep 1; done
+          cat workerd.log; echo "::error::workerd did not start"; exit 1
+
+      - name: Routes answer as documented
+        run: |
+          fail() { echo "::error::$1"; cat workerd.log; exit 1; }
+          code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          [ "$(code http://127.0.0.1:8787/robots.txt)" = 200 ] || fail "/robots.txt is not 200"
+          [ "$(code http://127.0.0.1:8787/?info=1)" = 401 ] || fail "/?info=1 without the password is not 401"
+          [ "$(code -H 'X-Pass: ci' http://127.0.0.1:8787/?info=1)" = 500 ] || fail "with no S3 behind it, /?info=1 should be a 500"
+          curl -s http://127.0.0.1:8787/cli | grep -q 'http://127.0.0.1:8787' || fail "/cli does not carry the request origin"
+          curl -s -H 'X-Forwarded-Proto: https' -H 'Host: files.example.com' http://127.0.0.1:8787/install.sh |
+            grep -q 'https://files.example.com' || fail "/install.sh ignores X-Forwarded-Proto"
+          echo "workerd serves every route that needs no storage"
 
   cli:
     name: db on ${{ matrix.os }} / node ${{ matrix.node }}

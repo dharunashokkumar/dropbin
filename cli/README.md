@@ -4,7 +4,7 @@
 That is the whole tool.
 
 It talks to a [dropbin](https://github.com/dharunashokkumar/dropbin) deployment:
-one Cloudflare Worker over one R2 bucket. You need its host and its password.
+one workerd process over one S3 bucket. You need its host and its password.
 
 ## Install
 
@@ -63,8 +63,8 @@ db --host files.example.com free          # just this once
 
 Zipped before they are sent, with `node:zlib` — `zip`, `tar` and
 `Compress-Archive` do not have to be installed. The server never zips
-anything: a Worker gets 10 ms of CPU per request, and hashing alone costs about
-1.4 ms per megabyte.
+anything: hashing alone costs about 1.4 ms per megabyte, and a folder zipped
+there would sit in the server's memory whole.
 
 ## What it will not do
 

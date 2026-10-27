@@ -66,32 +66,30 @@ What it does **not** defend, by design:
 
 ## Hardening your deployment
 
-- **Set a real password before the URL is anywhere.** With no secret set the
-  Worker falls back to `changeme` in code, and a stranger can upload to and
-  delete from your bucket. Verify what is actually live — `wrangler secret list`
-  only ever shows *names*:
+- **Set a real password before the URL is anywhere.** With `ACCESS_PASSWORD`
+  unset or empty the Worker falls back to `changeme` in code, and a stranger can
+  upload to and delete from your bucket. Verify what is actually live rather
+  than what you think the environment holds (`changeme` must get a 401):
 
   ```sh
   curl -o /dev/null -w '%{http_code}\n' -H "X-Pass: YOUR_PASSWORD" https://host/?info=1
   ```
 
-  `wrangler secret put` reads stdin when it is not a tty and accepts an empty
-  value silently, printing the same "✨ Success!", so set it as
-  `printf 'PASS' | npx wrangler secret put ACCESS_PASSWORD` and prove it with
-  the curl above. Note also that a secret cannot override a `[vars]` entry of
-  the same name — Wrangler refuses to create it — which is why
-  `ACCESS_PASSWORD` is deliberately absent from `wrangler.toml`.
+- **Give the S3 key one bucket and nothing else.** dropbin needs read, write
+  and list on its own bucket. A key that can see other buckets turns a leaked
+  password into a leaked store.
 
 - **Prefer the header or the cookie over `?p=`.** The password is accepted four
   ways: `?p=`, `X-Pass:`, HTTP basic auth, and the `dp` cookie. A query string
   ends up in browser history, in `Referer` on any outbound link, and in request
-  logs — and `[observability]` is enabled in `wrangler.toml`. Use `?p=` for
+  logs — yours and those of any proxy in front. Use `?p=` for
   throwaway curl against a test instance, not in anything you paste around.
 
 - **Put a rate limit in front of it.** The Worker does not throttle password
-  attempts. A Cloudflare WAF rate-limiting rule on the hostname (say, 20
-  requests per minute per IP with a 401 response) turns a single shared password
-  from brute-forceable into merely guessable. Choose a long password.
+  attempts. A rate limit on the hostname in whatever sits in front — a reverse
+  proxy, or a CDN / WAF rule (say, 20 requests per minute per IP with a 401
+  response) — turns a single shared password from brute-forceable into merely
+  guessable. Choose a long password.
 
 - **Deploy on a subdomain, not the apex.** You are serving files people upload.
   A dedicated `files.example.com` keeps the `dp` cookie and any sandbox escape
@@ -102,8 +100,8 @@ What it does **not** defend, by design:
   `db open` / `db qr` link at once, since both are derived from it.
 
 - **Remember there is no expiry.** Files live until you `DELETE` them, and
-  `QUOTA_GB` is a display figure, not a cap — R2 keeps accepting uploads past
-  it and starts billing.
+  `QUOTA_GB` is a display figure, not a cap — set a quota on the bucket itself
+  if the disk or the bill has a limit.
 
 ## In scope / out of scope
 
@@ -115,5 +113,5 @@ supply-chain problem in the `dropbin` npm package.
 
 Out of scope: anything that requires the password already; brute-forcing a weak
 password you chose; guessing a pin *with* the password; missing rate limiting on
-a deployment with no WAF rule (documented above); denial of service by uploading
-until the bill hurts; a deployment still running `changeme`.
+a deployment with nothing in front (documented above); denial of service by
+uploading until the disk or the bill hurts; a deployment still running `changeme`.
