@@ -14,7 +14,8 @@ using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     (name = "dropbin", worker = .dropbin),
-    (name = "storage", network = (allow = ["public", "private"])),
+    # tlsOptions: without a CA list workerd trusts nothing, and an https:// S3 endpoint fails every request.
+    (name = "storage", network = (allow = ["public", "private"], tlsOptions = (trustBrowserCas = true))),
   ],
   sockets = [
     (name = "http", address = "*:8787", service = "dropbin",
