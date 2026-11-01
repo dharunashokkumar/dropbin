@@ -16,6 +16,6 @@
     "start": "workerd serve workerd.capnp"
   },
   "devDependencies": {
-    "workerd": "1.20261013.1"
+    "workerd": "1.20261029.1"
   }
 }
